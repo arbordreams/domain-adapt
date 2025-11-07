@@ -167,10 +167,24 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
     _event({"preflight": True, "ok": ok, "strict": strict_sources, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
     if getattr(args, "preflight_only", False):
         _log("[preflight] preflight-only requested; exiting after checks")
-        stop_evt.set(); _fp.close()
+        try:
+            stop_evt.set()  # may not exist yet
+        except Exception:
+            pass
+        try:
+            _fp.close()
+        except Exception:
+            pass
         return
     if strict_sources and not ok:
-        stop_evt.set(); _fp.close()
+        try:
+            stop_evt.set()
+        except Exception:
+            pass
+        try:
+            _fp.close()
+        except Exception:
+            pass
         raise SystemExit("Preflight failed for one or more sources (strict-sources). Aborting.")
 
     # Monitor thread to log progress
