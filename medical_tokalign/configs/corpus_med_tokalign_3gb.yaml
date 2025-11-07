@@ -1,0 +1,59 @@
+# TokAlign-faithful medical corpus (3.0 GB)
+# Deterministic, deduplicated, strict preflight, resumable
+
+random_seed: 17
+target_total_bytes: 3000000000
+output_dir: medical_tokalign/data/biomed_corpus
+prevent_eval_contamination: true
+near_dup: minhash   # requires datasketch; set to 'none' to disable
+
+defaults:
+  min_chars: 200
+  max_chars: 20000
+
+sources:
+  pubmed_abstracts:
+    enabled: true
+    type: hf
+    dataset: scientific_papers
+    name: pubmed
+    splits: [train, validation, test]
+    text_fields: [article, abstract, text]
+    target_bytes: 1800000000
+    min_chars: 200
+    max_chars: 20000
+
+  pubmed_rct:
+    enabled: true
+    type: hf
+    dataset: zj88zj/PubMed_200k_RCT
+    name: null
+    splits: [train, validation, test]
+    text_fields: [text]
+    target_bytes: 600000000
+    min_chars: 60
+    max_chars: 20000
+
+  ccdv_pubmed_summ:
+    enabled: true
+    type: hf
+    dataset: ccdv/pubmed-summarization
+    name: null
+    splits: [train, validation]
+    text_fields: [article, abstract]
+    target_bytes: 500000000
+    min_chars: 200
+    max_chars: 20000
+
+  meddialog:
+    enabled: true
+    type: hf
+    dataset: bigbio/meddialog
+    name: null
+    splits: [train]
+    text_fields: [text, dialogue, utterances, dialog, conversation, content]
+    target_bytes: 100000000
+    min_chars: 80
+    max_chars: 20000
+
+

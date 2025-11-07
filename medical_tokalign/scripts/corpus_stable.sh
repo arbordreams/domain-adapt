@@ -10,7 +10,8 @@ cd "$REPO_ROOT"
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
 export HF_DATASETS_TRUST_REMOTE_CODE="${HF_DATASETS_TRUST_REMOTE_CODE:-1}"
 
-CONFIG_PATH="$ROOT_DIR/configs/corpus_biomed.yaml"
+# Allow override via CORPUS_CONFIG; default to standard biomed config
+CONFIG_PATH="${CORPUS_CONFIG:-$ROOT_DIR/configs/corpus_biomed.yaml}"
 LOGDIR="${LOGDIR:-$ROOT_DIR/runs/logs}"
 mkdir -p "$LOGDIR"
 

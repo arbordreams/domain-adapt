@@ -49,6 +49,7 @@ ujson>=5.10.0
 orjson>=3.10.7
 psutil>=5.9.8
 pynvml>=11.5.0
+datasketch>=1.6.5
 
 # Notebooks are not required for the pipeline
 
