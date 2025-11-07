@@ -1,0 +1,22 @@
+{
+  "total_bytes": 2660360219,
+  "target_total_bytes": 4000000000,
+  "complete": false,
+  "sources": {
+    "meddialog": {
+      "bytes": 307801
+    },
+    "pubmed_rct": {
+      "bytes": 401987084
+    },
+    "pubmedqa": {
+      "bytes": 1639223
+    },
+    "ccdv_pubmed_summ": {
+      "bytes": 756288990
+    },
+    "pubmed_abstracts": {
+      "bytes": 1500137121
+    }
+  }
+}

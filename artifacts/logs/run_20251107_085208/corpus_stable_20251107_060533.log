@@ -1,0 +1,54 @@
+[corpus_stable] Preflight only...
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+[preflight] [OK] pubmed_abstracts: scientific_papers/pubmed ()
+[preflight]   - split=train: ok; fields=article,abstract
+[preflight]   - split=validation: ok; fields=article,abstract
+[preflight]   - split=test: ok; fields=article,abstract
+[preflight] [OK] ccdv_pubmed_summ: ccdv/pubmed-summarization ()
+[preflight]   - split=train: ok; fields=article,abstract
+[preflight]   - split=validation: ok; fields=article,abstract
+[preflight] [OK] pubmedqa: qiaojin/PubMedQA/pqa_labeled ()
+[preflight]   - split=train: ok; fields=context,long_answer,question
+[preflight] [OK] pubmed_rct: zj88zj/PubMed_200k_RCT ()
+[preflight]   - split=train: ok; fields=text
+[preflight]   - split=validation: ok; fields=text
+[preflight]   - split=test: ok; fields=text
+[preflight] [OK] meddialog: bigbio/meddialog ()
+[preflight]   - split=train: ok; fields=utterances
+[preflight] preflight-only requested; exiting after checks
+[corpus_stable] Building corpus (strict, resumable)...
+/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
+  import pynvml  # type: ignore[import]
+[preflight] [OK] pubmed_abstracts: scientific_papers/pubmed ()
+[preflight]   - split=train: ok; fields=article,abstract
+[preflight]   - split=validation: ok; fields=article,abstract
+[preflight]   - split=test: ok; fields=article,abstract
+[preflight] [OK] ccdv_pubmed_summ: ccdv/pubmed-summarization ()
+[preflight]   - split=train: ok; fields=article,abstract
+[preflight]   - split=validation: ok; fields=article,abstract
+[preflight] [OK] pubmedqa: qiaojin/PubMedQA/pqa_labeled ()
+[preflight]   - split=train: ok; fields=context,long_answer,question
+[preflight] [OK] pubmed_rct: zj88zj/PubMed_200k_RCT ()
+[preflight]   - split=train: ok; fields=text
+[preflight]   - split=validation: ok; fields=text
+[preflight]   - split=test: ok; fields=text
+[preflight] [OK] meddialog: bigbio/meddialog ()
+[preflight]   - split=train: ok; fields=utterances
+[corpus] 2.66 GB / 4.00 GB (66.5%)
+/usr/local/lib/python3.12/dist-packages/datasets/load.py:1499: FutureWarning: The repository for scientific_papers contains custom code which must be executed to correctly load the dataset. You can inspect the repository content at https://hf.co/datasets/scientific_papers
+You can avoid this message in future by passing the argument `trust_remote_code=True`.
+Passing `trust_remote_code=True` will be mandatory to load this dataset from the next major release of `datasets`.
+  warnings.warn(
+[corpus] 2.66 GB / 4.00 GB (66.6%)
+[corpus] 2.67 GB / 4.00 GB (66.7%)
+[corpus] 2.67 GB / 4.00 GB (66.8%)
+[corpus] 2.67 GB / 4.00 GB (66.9%)
+[corpus] 2.68 GB / 4.00 GB (66.9%)
+[corpus] 2.68 GB / 4.00 GB (67.0%)
+/usr/local/lib/python3.12/dist-packages/datasets/load.py:1499: FutureWarning: The repository for bigbio/meddialog contains custom code which must be executed to correctly load the dataset. You can inspect the repository content at https://hf.co/datasets/bigbio/meddialog
+You can avoid this message in future by passing the argument `trust_remote_code=True`.
+Passing `trust_remote_code=True` will be mandatory to load this dataset from the next major release of `datasets`.
+  warnings.warn(
+[corpus] 2.68 GB / 4.00 GB (67.1%)
+[error] built 0 bytes < target 4000000000 bytes with remaining capacity 1041763986. Aborting.

@@ -460,15 +460,31 @@ def train_glove_vectors(
     # Allow overrides via environment for speed tuning
     try:
         memory_mb = float(os.environ.get("GLOVE_MEMORY_MB", memory_mb))
+
+    # Auto-size memory if not provided: use ~20% of system RAM, clamped [4096, 65536] MB
+    if "GLOVE_MEMORY_MB" not in os.environ:
+        try:
+            with open("/proc/meminfo") as mf:
+                for line in mf:
+                    if line.startswith("MemTotal:"):
+                        parts = line.split()
+                        mem_kb = int(parts[1])
+                        auto_mb = max(4096, min(65536, int((mem_kb/1024) * 0.20)))
+                        if auto_mb > memory_mb:
+                            memory_mb = float(auto_mb)
+                        break
+        except Exception:
+            pass
+
     except Exception:
         pass
     # Determine threads: env override > explicit arg > auto from CPU (leave one core free)
     threads_val: int
     env_thr = os.environ.get("GLOVE_THREADS")
     if env_thr is not None:
-    try:
+        try:
             threads_val = max(1, int(env_thr))
-    except Exception:
+        except Exception:
             threads_val = max(1, (os.cpu_count() or 1) - 1)
     elif threads is not None:
         threads_val = max(1, int(threads))

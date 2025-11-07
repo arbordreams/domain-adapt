@@ -1,0 +1,16 @@
+[preflight] [OK] pubmed_abstracts: scientific_papers/pubmed ()
+[preflight]   - split=train: ok; fields=article,abstract
+[preflight]   - split=validation: ok; fields=article,abstract
+[preflight]   - split=test: ok; fields=article,abstract
+[preflight] [OK] ccdv_pubmed_summ: ccdv/pubmed-summarization ()
+[preflight]   - split=train: ok; fields=article,abstract
+[preflight]   - split=validation: ok; fields=article,abstract
+[preflight] [OK] pubmedqa: qiaojin/PubMedQA/pqa_labeled ()
+[preflight]   - split=train: ok; fields=context,long_answer,question
+[preflight] [OK] pubmed_rct: zj88zj/PubMed_200k_RCT ()
+[preflight]   - split=train: ok; fields=text
+[preflight]   - split=validation: ok; fields=text
+[preflight]   - split=test: ok; fields=text
+[preflight] [OK] meddialog: bigbio/meddialog ()
+[preflight]   - split=train: ok; fields=utterances
+[corpus] 0.22 GB / 4.00 GB (5.6%)

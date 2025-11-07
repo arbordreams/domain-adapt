@@ -1,0 +1,14 @@
+{
+  "timestamp": "20251107_085114",
+  "model_id": "Qwen/Qwen2-7B",
+  "top_k": 8192,
+  "pivot": 300,
+  "warmup_steps": 3000,
+  "idle_minutes": 120,
+  "wall_minutes": 720,
+  "shutdown_delay": 600,
+  "adapt_rc": -1,
+  "eval_rc": -1,
+  "git_commit": "edb8761bb2a1dc3615f6a5229e5a47380441a3c4",
+  "hostname": "6957bcaf3b7d"
+}

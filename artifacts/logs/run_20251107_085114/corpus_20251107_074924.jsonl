@@ -1,0 +1,3 @@
+{"preflight": true, "ok": true, "strict": true, "ts": "2025-11-07T07:49:45Z"}
+{"progress": "corpus", "bytes": 2884186139, "target": 4000000000, "ts": "2025-11-07T07:49:45Z"}
+{"source": "pubmed_abstracts", "bytes": 1500137121, "kept": 0, "seen": 0, "ts": "2025-11-07T075433Z"}

@@ -1,0 +1,29 @@
+{"progress": "corpus", "bytes": 0, "target": 4000000000, "ts": "2025-11-07T04:25:40Z"}
+{"progress": "corpus", "bytes": 70226742, "target": 4000000000, "ts": "2025-11-07T04:25:55Z"}
+{"progress": "corpus", "bytes": 152614684, "target": 4000000000, "ts": "2025-11-07T04:26:10Z"}
+{"progress": "corpus", "bytes": 235959515, "target": 4000000000, "ts": "2025-11-07T04:26:25Z"}
+{"progress": "corpus", "bytes": 302139970, "target": 4000000000, "ts": "2025-11-07T04:26:41Z"}
+{"progress": "corpus", "bytes": 370832940, "target": 4000000000, "ts": "2025-11-07T04:26:56Z"}
+{"progress": "corpus", "bytes": 445972392, "target": 4000000000, "ts": "2025-11-07T04:27:11Z"}
+{"progress": "corpus", "bytes": 535050484, "target": 4000000000, "ts": "2025-11-07T04:27:26Z"}
+{"progress": "corpus", "bytes": 618694667, "target": 4000000000, "ts": "2025-11-07T04:27:41Z"}
+{"progress": "corpus", "bytes": 704210502, "target": 4000000000, "ts": "2025-11-07T04:27:56Z"}
+{"progress": "corpus", "bytes": 789904841, "target": 4000000000, "ts": "2025-11-07T04:28:11Z"}
+{"progress": "corpus", "bytes": 875029501, "target": 4000000000, "ts": "2025-11-07T04:28:26Z"}
+{"progress": "corpus", "bytes": 960986268, "target": 4000000000, "ts": "2025-11-07T04:28:41Z"}
+{"progress": "corpus", "bytes": 1048554786, "target": 4000000000, "ts": "2025-11-07T04:28:56Z"}
+{"progress": "corpus", "bytes": 1135911658, "target": 4000000000, "ts": "2025-11-07T04:29:11Z"}
+{"progress": "corpus", "bytes": 1221041515, "target": 4000000000, "ts": "2025-11-07T04:29:26Z"}
+{"progress": "corpus", "bytes": 1303133698, "target": 4000000000, "ts": "2025-11-07T04:29:41Z"}
+{"progress": "corpus", "bytes": 1391567544, "target": 4000000000, "ts": "2025-11-07T04:29:56Z"}
+{"progress": "corpus", "bytes": 1477672612, "target": 4000000000, "ts": "2025-11-07T04:30:11Z"}
+{"progress": "corpus", "bytes": 1565100651, "target": 4000000000, "ts": "2025-11-07T04:30:26Z"}
+{"progress": "corpus", "bytes": 1639130815, "target": 4000000000, "ts": "2025-11-07T04:30:41Z"}
+{"progress": "corpus", "bytes": 1731648505, "target": 4000000000, "ts": "2025-11-07T04:30:56Z"}
+{"progress": "corpus", "bytes": 1822179188, "target": 4000000000, "ts": "2025-11-07T04:31:11Z"}
+{"progress": "corpus", "bytes": 1911506812, "target": 4000000000, "ts": "2025-11-07T04:31:26Z"}
+{"source": "pubmed_abstracts", "bytes": 2000001837, "kept": 158414, "seen": 114458, "ts": "2025-11-07T04:31:41Z"}
+{"progress": "corpus", "bytes": 2000160251, "target": 4000000000, "ts": "2025-11-07T04:31:41Z"}
+{"progress": "corpus", "bytes": 2047222243, "target": 4000000000, "ts": "2025-11-07T04:31:56Z"}
+{"source": "pubmedqa_text", "bytes": 99403579, "kept": 61249, "seen": 61249, "ts": "2025-11-07T04:32:10Z"}
+{"progress": "corpus", "bytes": 2099625079, "target": 4000000000, "ts": "2025-11-07T04:32:11Z"}

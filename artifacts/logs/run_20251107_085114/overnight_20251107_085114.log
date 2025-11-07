@@ -1,0 +1,25 @@
+[overnight] START model_id=Qwen/Qwen2-7B top_k=8192 pivot=300 warmup=3000
+[overnight] adapt...
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/domain-adapt/medical_tokalign/src/cli.py", line 16, in <module>
+    from . import api as api
+  File "/workspace/domain-adapt/medical_tokalign/src/api.py", line 469
+    try:
+    ^
+IndentationError: expected an indented block after 'if' statement on line 468
+[overnight] adapt rc=1
+[overnight] eval...
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/domain-adapt/medical_tokalign/src/cli.py", line 16, in <module>
+    from . import api as api
+  File "/workspace/domain-adapt/medical_tokalign/src/api.py", line 469
+    try:
+    ^
+IndentationError: expected an indented block after 'if' statement on line 468
+[overnight] eval rc=1
+[overnight] DONE adapt_rc=1 eval_rc=1
+[overnight] archiving artifacts...

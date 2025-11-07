@@ -1,0 +1,14 @@
+{"preflight": true, "ok": true, "strict": true, "ts": "2025-11-07T06:06:27Z"}
+{"progress": "corpus", "bytes": 2660360219, "target": 4000000000, "ts": "2025-11-07T06:06:27Z"}
+{"source": "pubmed_abstracts", "bytes": 1500137121, "kept": 118849, "seen": 0, "ts": "2025-11-07T061006Z"}
+{"progress": "corpus", "bytes": 2663425315, "target": 4000000000, "ts": "2025-11-07T06:14:44Z"}
+{"progress": "corpus", "bytes": 2667152099, "target": 4000000000, "ts": "2025-11-07T06:14:59Z"}
+{"progress": "corpus", "bytes": 2670500027, "target": 4000000000, "ts": "2025-11-07T06:15:44Z"}
+{"progress": "corpus", "bytes": 2674231675, "target": 4000000000, "ts": "2025-11-07T06:16:44Z"}
+{"progress": "corpus", "bytes": 2675630739, "target": 4000000000, "ts": "2025-11-07T06:16:59Z"}
+{"source": "ccdv_pubmed_summ", "bytes": 756288990, "kept": 59568, "seen": 126557, "ts": "2025-11-07T061717Z"}
+{"source": "pubmedqa", "bytes": 1639223, "kept": 1000, "seen": 1000, "ts": "2025-11-07T061718Z"}
+{"progress": "corpus", "bytes": 2678128491, "target": 4000000000, "ts": "2025-11-07T06:17:29Z"}
+{"source": "pubmed_rct", "bytes": 401987084, "kept": 1986887, "seen": 0, "ts": "2025-11-07T061817Z"}
+{"progress": "corpus", "bytes": 2682359859, "target": 4000000000, "ts": "2025-11-07T06:18:30Z"}
+{"source": "meddialog", "bytes": 307801, "kept": 475, "seen": 482, "ts": "2025-11-07T061842Z"}
