@@ -491,6 +491,12 @@ def train_glove_vectors(
     else:
         threads_val = max(1, (os.cpu_count() or 1) - 1)
 
+    # Log chosen GloVe resources
+    try:
+        print(f"[glove] memory_mb={memory_mb} threads={threads_val} min_count={vocab_min_count} window={window_size}", flush=True)
+    except Exception:
+        pass
+
     # 1) vocab_count
     with open(corpus_path, "rb") as fin, open(vocab_file, "wb") as fout:
         subprocess.run(
@@ -519,14 +525,42 @@ def train_glove_vectors(
             check=True,
         )
 
-    # 3) shuffle
-    with open(co_file, "rb") as fin, open(co_shuf_file, "wb") as fout:
-        subprocess.run(
-            [shuffle_bin, "-memory", str(memory_mb), "-verbose", "2"],
-            stdin=fin,
-            stdout=fout,
-            check=True,
-        )
+    # Bound cooccurrence size; tighten params if oversized (>40 GiB) and re-run cooccur
+    try:
+        _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
+        if _co_size > 40 * 1024 * 1024 * 1024:
+            print(f"[glove] cooccur too large: {_co_size} bytes; tightening params and regenerating", flush=True)
+            window_size = min(window_size, 8)
+            vocab_min_count = max(vocab_min_count, 10)
+            with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
+                subprocess.run([
+                    cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
+                ], stdin=fin, stdout=fout, check=True)
+    except Exception:
+        pass
+    # 3) shuffle with retry/backoff
+    _last_err = None
+    for _attempt in range(2):
+        try:
+            with open(co_file, 'rb') as fin, open(co_shuf_file, 'wb') as fout:
+                subprocess.run([shuffle_bin, '-memory', str(memory_mb), '-verbose', '2'], stdin=fin, stdout=fout, check=True)
+            break
+        except Exception as e:
+            _last_err = e
+            try:
+                memory_mb = float(min(float(memory_mb) * 2.0, 65536.0))
+            except Exception:
+                memory_mb = float(65536.0)
+            window_size = min(window_size, 8)
+            vocab_min_count = max(vocab_min_count, 10)
+            print(f"[glove] shuffle retry with memory_mb={memory_mb}, window={window_size}, min_count={vocab_min_count}", flush=True)
+            with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
+                subprocess.run([
+                    cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
+                ], stdin=fin, stdout=fout, check=True)
+    else:
+        raise _last_err or RuntimeError('GloVe shuffle failed after retries')
+
 
     # 4) glove (training)
     subprocess.run(
@@ -554,6 +588,29 @@ def train_glove_vectors(
         check=True,
         cwd=glove_dir,
     )
+
+    # Emit resources.json for reproducibility
+    try:
+        _ram_mb = None
+        try:
+            with open('/proc/meminfo') as _mf:
+                for _ln in _mf:
+                    if _ln.startswith('MemTotal:'):
+                        _ram_mb = int(_ln.split()[1]) // 1024
+                        break
+        except Exception:
+            pass
+        _res = {
+            'ram_total_mb': _ram_mb,
+            'memory_mb': float(memory_mb),
+            'threads': int(threads_val),
+            'window_size': int(window_size),
+            'vocab_min_count': int(vocab_min_count),
+        }
+        with open(os.path.join(glove_dir, f'resources.{base}.json'), 'w', encoding='utf-8') as _rf:
+            __import__('json').dump(_res, _rf)
+    except Exception:
+        pass
 
     vec_path = f"{save_file}.txt"
     if not os.path.isfile(vec_path):

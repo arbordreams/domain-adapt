@@ -1,57 +1,65 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Defaults (override via flags)
-MODEL_ID="Qwen/Qwen2-7B"
-TOP_K=8192
-PIVOT=300
-WARMUP_STEPS=0
+MODEL_ID=${MODEL_ID:-${1:-Qwen/Qwen2-7B}}
+TOP_K=${TOP_K:-8192}
+PIVOT=${PIVOT:-300}
+WARMUP_STEPS=${WARMUP_STEPS:-0}
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --model_id) MODEL_ID="$2"; shift 2;;
-    --top_k) TOP_K="$2"; shift 2;;
-    --pivot) PIVOT="$2"; shift 2;;
-    --warmup_steps) WARMUP_STEPS="$2"; shift 2;;
-    *) echo "[autorun_stable] Unknown flag $1"; exit 1;;
-  esac
-done
+export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+export HF_HOME=${HF_HOME:-/workspace/.cache/huggingface}
+export HF_HUB_ENABLE_HF_TRANSFER=1
+export HF_DATASETS_TRUST_REMOTE_CODE=1
 
-# Resolve paths
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"      # medical_tokalign
-REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"                           # repo root
-cd "$REPO_ROOT"
+# Conservative defaults for GloVe and threads
+RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 65536)
+: "${GLOVE_MEMORY_MB:=$(( RAM_MB / 3 ))}"
+if [ "$GLOVE_MEMORY_MB" -lt 8192 ]; then GLOVE_MEMORY_MB=8192; fi
+if [ "$GLOVE_MEMORY_MB" -gt 65536 ]; then GLOVE_MEMORY_MB=65536; fi
+: "${GLOVE_THREADS:=$(( $(nproc 2>/dev/null || echo 32) - 1 ))}"
+if [ "$GLOVE_THREADS" -lt 1 ]; then GLOVE_THREADS=1; fi
+export GLOVE_MEMORY_MB GLOVE_THREADS
 
-# Env defaults
-export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
-export HF_DATASETS_TRUST_REMOTE_CODE="${HF_DATASETS_TRUST_REMOTE_CODE:-1}"
-
-LOGDIR="$ROOT_DIR/runs/logs"
-mkdir -p "$LOGDIR"
-TS="$(date +%Y%m%d_%H%M%S)"
-PIPE_LOG="$LOGDIR/autorun_stable_${TS}.log"
+ROOT=/workspace/domain-adapt
+cd "$ROOT"
+LOG_DIR=$ROOT/medical_tokalign/runs/logs
+mkdir -p "$LOG_DIR"
+TS=$(date +%Y%m%d_%H%M%S)
+LOG="$LOG_DIR/autorun_stable_${TS}.log"
+EVAL_CFG=medical_tokalign/configs/eval_medical.yaml
 
 {
-  echo "[autorun_stable] prepare-data --all"
-  python -m medical_tokalign.src.cli prepare-data --all
-
-  echo "[autorun_stable] corpus_stable.sh"
-  bash "$ROOT_DIR/scripts/corpus_stable.sh"
-
-  echo "[autorun_stable] adapt model_id=$MODEL_ID top_k=$TOP_K pivot=$PIVOT warmup_steps=$WARMUP_STEPS"
+  echo "[env] RAM_MB=$RAM_MB GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
+  # Optional prep if present
+  if [ -x medical_tokalign/scripts/prepare_medical_data.sh ]; then
+    echo "[prepare]"; bash medical_tokalign/scripts/prepare_medical_data.sh || true
+  fi
+  echo "[corpus]"; bash medical_tokalign/scripts/corpus_stable.sh
+  echo "[adapt]";
+  set +e
   python -m medical_tokalign.src.cli adapt \
     --model_id "$MODEL_ID" \
     --top_k "$TOP_K" \
     --pivot "$PIVOT" \
     --warmup_steps "$WARMUP_STEPS"
-
-  echo "[autorun_stable] eval"
-  python -m medical_tokalign.src.cli eval \
-    --config "$ROOT_DIR/configs/eval_medical.yaml"
-
-  echo "[autorun_stable] DONE"
-} 2>&1 | tee -a "$PIPE_LOG"
-
-echo "[autorun_stable] Logs: $PIPE_LOG"
-
-
+  ADAPT_RC=$?
+  set -e
+  if [ "$ADAPT_RC" -ne 0 ]; then
+    echo "[adapt] failed rc=$ADAPT_RC; retrying with higher memory"
+    GLOVE_MEMORY_MB=$(( GLOVE_MEMORY_MB * 2 ))
+    if [ "$GLOVE_MEMORY_MB" -gt 65536 ]; then GLOVE_MEMORY_MB=65536; fi
+    export GLOVE_MEMORY_MB
+    python -m medical_tokalign.src.cli adapt \
+      --model_id "$MODEL_ID" \
+      --top_k "$TOP_K" \
+      --pivot "$PIVOT" \
+      --warmup_steps "$WARMUP_STEPS"
+    ADAPT_RC=$?
+  fi
+  if [ "$ADAPT_RC" -ne 0 ]; then
+    echo "[autorun] adapt failed after retry; exiting before eval"
+    exit 1
+  fi
+  echo "[eval]"; python -m medical_tokalign.src.cli eval --config "$EVAL_CFG"
+} 2>&1 | tee -a "$LOG"
