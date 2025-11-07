@@ -120,6 +120,15 @@ python -m medical_tokalign.src.cli prepare-data --all || PREP_RC=$?
 echo "[autorun] prepare rc=$PREP_RC"
 
 echo "[autorun] corpus_stable.sh (skip if exists)"
+# Allow custom corpus config (defaults to 3GB TokAlign medical if present)
+if [[ -z "${CORPUS_CONFIG:-}" ]]; then
+  if [[ -f "$ROOT_DIR/configs/corpus_med_tokalign_3gb.yaml" ]]; then
+    export CORPUS_CONFIG="$ROOT_DIR/configs/corpus_med_tokalign_3gb.yaml"
+  fi
+fi
+if [[ -n "${CORPUS_CONFIG:-}" ]]; then
+  echo "[autorun] CORPUS_CONFIG=${CORPUS_CONFIG}"
+fi
 bash "$ROOT_DIR/scripts/corpus_stable.sh" || true
 
 ADAPT_RC=1
