@@ -25,6 +25,22 @@ export HF_DATASETS_CACHE=${HF_DATASETS_CACHE:-/workspace/.cache/huggingface/data
 export TRANSFORMERS_CACHE=${TRANSFORMERS_CACHE:-/workspace/.cache/huggingface/transformers}
 mkdir -p "$HF_HOME" "$HF_DATASETS_CACHE" "$TRANSFORMERS_CACHE"
 
+# Auto-detect CPU cores and set GloVe threads if not provided (leave one core free)
+if command -v nproc >/dev/null 2>&1; then
+  __CORES=$(nproc)
+elif command -v getconf >/dev/null 2>&1; then
+  __CORES=$(getconf _NPROCESSORS_ONLN || echo 1)
+else
+  __CORES=$(python - <<'PY'
+import os
+print(os.cpu_count() or 1)
+PY
+)
+fi
+if [[ -n "${__CORES:-}" ]]; then
+  export GLOVE_THREADS=${GLOVE_THREADS:-$(( __CORES>1 ? __CORES-1 : 1 ))}
+fi
+
 TMUX_MODE=0
 ARGS=()
 while [[ $# -gt 0 ]]; do

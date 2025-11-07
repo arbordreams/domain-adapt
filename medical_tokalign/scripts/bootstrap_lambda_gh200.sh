@@ -53,7 +53,19 @@ pip install -r medical_tokalign/requirements.txt || true
 
 echo "[GH200] Attempting flash-attn build for H100 (optional)..."
 # Build from source targeting Hopper (sm_90). If this fails, SDPA will be used instead.
-export MAX_JOBS=${MAX_JOBS:-64}
+# Auto-detect CPU cores for parallel build jobs
+if command -v nproc >/dev/null 2>&1; then
+  _CORES=$(nproc)
+elif command -v getconf >/dev/null 2>&1; then
+  _CORES=$(getconf _NPROCESSORS_ONLN || echo 8)
+else
+  _CORES=$(python - <<'PY'
+import os
+print(os.cpu_count() or 8)
+PY
+)
+fi
+export MAX_JOBS=${MAX_JOBS:-${_CORES}}
 export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST:-90}
 export FLASH_ATTENTION_FORCE_BUILD=1
 export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}

@@ -400,7 +400,7 @@ def train_glove_vectors(
     max_iter: int = 15,
     window_size: int = 15,
     memory_mb: float = 1536.0,
-    threads: int = 64,
+    threads: Optional[int] = None,
     x_max: int = 10,
 ) -> str:
     """Train GloVe vectors from a token-id corpus (space-separated ids per line).
@@ -462,10 +462,18 @@ def train_glove_vectors(
         memory_mb = float(os.environ.get("GLOVE_MEMORY_MB", memory_mb))
     except Exception:
         pass
-    try:
-        threads = int(os.environ.get("GLOVE_THREADS", threads))
-    except Exception:
-        pass
+    # Determine threads: env override > explicit arg > auto from CPU (leave one core free)
+    threads_val: int
+    env_thr = os.environ.get("GLOVE_THREADS")
+    if env_thr is not None:
+        try:
+            threads_val = max(1, int(env_thr))
+        except Exception:
+            threads_val = max(1, (os.cpu_count() or 1) - 1)
+    elif threads is not None:
+        threads_val = max(1, int(threads))
+    else:
+        threads_val = max(1, (os.cpu_count() or 1) - 1)
 
     # 1) vocab_count
     with open(corpus_path, "rb") as fin, open(vocab_file, "wb") as fout:
@@ -511,7 +519,7 @@ def train_glove_vectors(
             "-save-file",
             save_file,
             "-threads",
-            str(threads),
+            str(threads_val),
             "-input-file",
             co_shuf_file,
             "-x-max",
