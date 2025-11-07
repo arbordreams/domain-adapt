@@ -273,10 +273,10 @@ def compute_alignment(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(td, f)
     # Save compact alignment report
-        try:
+    try:
         with open(out_path + ".report.json", "w", encoding="utf-8") as rf:
             json.dump(report, rf, indent=2)
-        except Exception:
+    except Exception:
         pass
     return out_path
 
