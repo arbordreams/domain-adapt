@@ -181,8 +181,9 @@ WALL_PID=$!
 # Conservative defaults for GloVe and threads
 RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 65536)
 : "${GLOVE_MEMORY_MB:=$(( RAM_MB / 5 ))}"
-if [ "$GLOVE_MEMORY_MB" -lt 4096 ]; then GLOVE_MEMORY_MB=4096; fi
+if [ "$GLOVE_MEMORY_MB" -lt 8192 ]; then GLOVE_MEMORY_MB=4096; fi
 if [ "$GLOVE_MEMORY_MB" -gt 65536 ]; then GLOVE_MEMORY_MB=65536; fi
 : "${GLOVE_THREADS:=$(( $(nproc 2>/dev/null || echo 32) - 1 ))}"
 if [ "$GLOVE_THREADS" -lt 1 ]; then GLOVE_THREADS=1; fi
 export GLOVE_MEMORY_MB GLOVE_THREADS
+echo "[overnight] GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
