@@ -235,10 +235,19 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             summary[s.name] = stats
             _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H%M%SZ")})
 
-        # Deterministic completion: fail if we didn't reach the global target
-        if target_total > 0 and global_written < target_total and strict_sources:
-            _log(f"[error] built {global_written} bytes < target {target_total} bytes (strict-sources). Aborting.")
-            raise SystemExit(1)
+        # Deterministic completion: don't abort if sources are exhausted
+        if target_total > 0 and strict_sources and global_written < target_total:
+            # Compute remaining capacity across sources based on per-source targets
+            remaining_capacity = 0
+            for s in sources_cfg:
+                p = os.path.join(out_root, f"{s.name}.jsonl")
+                written = os.path.getsize(p) if os.path.isfile(p) else 0
+                remaining_capacity += max(0, int(s.target_bytes) - int(written))
+            if remaining_capacity > 0:
+                _log(f"[error] built {global_written} bytes < target {target_total} bytes with remaining capacity {remaining_capacity}. Aborting.")
+                raise SystemExit(1)
+            else:
+                _log(f"[warn] built {global_written} bytes < target {target_total} bytes but all per-source budgets are exhausted. Finishing successfully.")
 
         # Write summary.json
         try:
