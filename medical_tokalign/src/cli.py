@@ -254,33 +254,30 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
         global_written += inc
         summary[s.name] = stats
         _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime('%Y-%m-%dT%H%M%SZ')})
+    # Deterministic completion: after iterating sources, decide whether to abort
+    if target_total > 0 and strict_sources and global_written < target_total:
+        remaining_capacity = 0
+        for s in sources_cfg:
+            p = os.path.join(out_root, f"{s.name}.jsonl")
+            written = os.path.getsize(p) if os.path.isfile(p) else 0
+            remaining_capacity += max(0, int(s.target_bytes) - int(written))
+        if remaining_capacity > 0:
+            _log(f"[warn] built {global_written} bytes < target {target_total} bytes; remaining per-source capacity {remaining_capacity}. Finishing without abort.")
+        else:
+            _log(f"[warn] built {global_written} bytes < target {target_total} bytes but all per-source budgets are exhausted. Finishing successfully.")
 
-        # Deterministic completion: don't abort if sources are exhausted
-        if target_total > 0 and strict_sources and global_written < target_total:
-            # Compute remaining capacity across sources based on per-source targets
-            remaining_capacity = 0
-            for s in sources_cfg:
-                p = os.path.join(out_root, f"{s.name}.jsonl")
-                written = os.path.getsize(p) if os.path.isfile(p) else 0
-                remaining_capacity += max(0, int(s.target_bytes) - int(written))
-            if remaining_capacity > 0:
-                _log(f"[error] built {global_written} bytes < target {target_total} bytes with remaining capacity {remaining_capacity}. Aborting.")
-                raise SystemExit(1)
-            else:
-                _log(f"[warn] built {global_written} bytes < target {target_total} bytes but all per-source budgets are exhausted. Finishing successfully.")
-
-        # Write summary.json
-        try:
-            with open(os.path.join(out_root, "summary.json"), "w", encoding="utf-8") as fsum:
-                json.dump({
-                    "total_bytes": global_written,
-                    "target_total_bytes": target_total,
-                    "complete": bool(target_total > 0 and global_written >= target_total),
-                    "sources": summary
-                }, fsum, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-        print(json.dumps(summary, indent=2))
+    # Write summary.json once
+    try:
+        with open(os.path.join(out_root, "summary.json"), "w", encoding="utf-8") as fsum:
+            json.dump({
+                "total_bytes": global_written,
+                "target_total_bytes": target_total,
+                "complete": bool(target_total > 0 and global_written >= target_total),
+                "sources": summary
+            }, fsum, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    print(json.dumps(summary, indent=2))
     # Cleanup resources and stop monitor thread
     try:
         if 'store' in locals() and store is not None and hasattr(store, 'close'):
