@@ -88,7 +88,23 @@ def _extract_text(ex: Dict, fields: List[str]) -> str:
         if v is None:
             continue
         if isinstance(v, list):
-            v = "\n".join(str(x) for x in v)
+            # Join list items; if dicts, collect string-like values
+            parts: List[str] = []
+            for x in v:
+                if isinstance(x, str):
+                    parts.append(x)
+                elif isinstance(x, dict):
+                    for vv in x.values():
+                        if isinstance(vv, str):
+                            parts.append(vv)
+                        elif isinstance(vv, list):
+                            parts.extend(str(xx) for xx in vv if isinstance(xx, str))
+                else:
+                    try:
+                        parts.append(str(x))
+                    except Exception:
+                        pass
+            v = "\n".join(p for p in parts if p)
         if isinstance(v, dict):
             # Sometimes text nested under 'document'/'article'
             inner = []

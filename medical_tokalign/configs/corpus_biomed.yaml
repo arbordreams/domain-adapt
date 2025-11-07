@@ -46,7 +46,7 @@ sources:
     type: hf
     dataset: qiaojin/PubMedQA
     name: pqa_labeled
-    splits: [train, dev, test]
+    splits: [train]
     text_fields: [context, long_answer, question]
     target_bytes: 200000000    # ~0.2 GB
     min_chars: 120
