@@ -148,7 +148,7 @@ def build_glove_corpora(
         wrote, stats_src, stats_tgt = _write_from(iter_texts_fallback())
 
     # Save stats sidecars next to corpora
-        try:
+    try:
         with open(os.path.splitext(corpus_src_path)[0] + ".stats.json", "w", encoding="utf-8") as fsrc:
             json.dump(stats_src, fsrc, indent=2)
         with open(os.path.splitext(corpus_tgt_path)[0] + ".stats.json", "w", encoding="utf-8") as ftgt:
