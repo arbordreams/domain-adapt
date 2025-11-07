@@ -130,7 +130,7 @@ ls -l medical_tokalign/runs/logs/pipeline_*.{log,jsonl}
 cat medical_tokalign/runs/logs/pipeline_*_summary.json
 ```
 
-Robust Corpus Build (preflight + deterministic, file-backed logging)
+Stable Corpus Build (preflight + deterministic, file-backed logging)
 ```
 # Optional preflight-only (validates datasets/splits/fields; does not write)
 python -m medical_tokalign.src.cli build-corpus \
@@ -138,10 +138,9 @@ python -m medical_tokalign.src.cli build-corpus \
   --preflight_only \
   --logdir medical_tokalign/runs/logs
 
-# Fresh or resumable strict build (fails fast if any source missing; no autofill)
+# Resumable strict build (fails fast if any source missing; no autofill)
 python -m medical_tokalign.src.cli build-corpus \
   --config medical_tokalign/configs/corpus_biomed.yaml \
-  --fresh \
   --strict_sources \
   --logdir medical_tokalign/runs/logs
 
@@ -149,6 +148,19 @@ python -m medical_tokalign.src.cli build-corpus \
 # - medical_tokalign/data/biomed_corpus/*.jsonl
 # - medical_tokalign/data/biomed_corpus/summary.json (complete flag)
 # - medical_tokalign/runs/logs/corpus_<ts>.{log,jsonl}
+```
+
+Stable Entrypoints
+```
+# One command to preflight + strict build (resumable)
+bash medical_tokalign/scripts/corpus_stable.sh
+
+# End-to-end: prepare-data → corpus_stable → adapt → eval
+bash medical_tokalign/scripts/autorun_stable.sh \
+  --model_id Qwen/Qwen2-7B \
+  --top_k 8192 \
+  --pivot 300 \
+  --warmup_steps 0
 ```
 
 Maintenance / Cleanup (RunPod)
