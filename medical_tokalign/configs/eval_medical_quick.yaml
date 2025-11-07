@@ -1,0 +1,82 @@
+# Quick evaluation profile for iterative development on H100.
+# - Uses vLLM backend for high-throughput inference
+# - Reduces dataset sizes to shorten total wall-clock time (~1–2 hours)
+# - Disables tokenizer analysis
+# NOTE: For final comprehensive validation, use eval_medical.yaml instead.
+
+model_id: Qwen/Qwen2-7B
+eval_backend: vllm        # vllm | hf | tensorrt_llm (stub)
+precision: bf16           # bf16 | fp8
+attn_impl: flash_attention_2
+compile: true
+grad_ckpt: false          # inference path; can be true for warmup
+allow_tf32: true
+matmul_precision: high
+
+random_seed: 17
+output_dir: medical_tokalign/runs/medical_eval
+seed_everything: true
+enable_tokenizer_analysis: false   # quick profile disables analysis
+enable_stats: true
+
+# vLLM sizing for 80GB H100
+vllm:
+  tensor_parallel_size: 1
+  gpu_memory_utilization: 0.92
+  max_model_len: 8192
+  max_batch_tokens: 65536
+  enforce_eager: false
+  trust_remote_code: false
+
+# HF fallback generation params (unchanged)
+hf:
+  per_device_batch_size: 8
+  max_model_len: 4096
+  ppl_batch_size: 64
+
+# Datasets: reduced limits for faster turnaround while remaining meaningful
+datasets:
+  pubmedqa:
+    enabled: true
+    split: test
+    limit: 500
+  medqa_usmle:
+    enabled: true
+    split: test
+    limit: 500
+  medmcqa:
+    enabled: true
+    split: validation
+    limit: 1000
+  mmlu_medical:
+    enabled: true
+    split: test
+    limit: 500
+    subjects: [anatomy, clinical_knowledge, professional_medicine, college_medicine]
+  mednli:
+    enabled: true
+    limit: 500
+  ncbi_disease:
+    enabled: true
+    limit: 500
+  bc5cdr:
+    enabled: true
+    limit: 1000
+  perplexity_corpus: null   # disabled for quick profile
+
+# Generation & eval settings (unchanged)
+gen:
+  max_new_tokens: 128
+  temperature: 0.0
+  top_p: 1.0
+  stop: ["\n", "\r\n"]
+
+# Alignment/artifact discovery (unchanged)
+alignment:
+  prefer_adapted_artifacts: true
+  search_dir: medical_tokalign/runs/tokenizer_adapt
+  use_adapted_model: true
+  use_adapted_tokenizer: true
+  compare_mode: base_vs_adapted  # none | base_vs_adapted
+
+
