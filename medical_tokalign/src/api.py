@@ -525,39 +525,54 @@ def train_glove_vectors(
             check=True,
         )
 
-    # Bound cooccurrence size; tighten params if oversized (>40 GiB) and re-run cooccur
+    # Bound cooccurrence size; tighten params if oversized
     try:
         _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
-        if _co_size > 40 * 1024 * 1024 * 1024:
-            print(f"[glove] cooccur too large: {_co_size} bytes; tightening params and regenerating", flush=True)
+        # If cooccurrence grows beyond 3 GiB, proactively tighten to avoid shuffle crashes
+        if _co_size > 3 * 1024 * 1024 * 1024:
+            print(f"[glove] cooccur large: {_co_size} bytes; tightening window/min_count and regenerating", flush=True)
             window_size = min(window_size, 8)
             vocab_min_count = max(vocab_min_count, 10)
             with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
                 subprocess.run([
                     cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
                 ], stdin=fin, stdout=fout, check=True)
+            _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
+            print(f"[glove] cooccur regenerated: size={_co_size} bytes; window={window_size} min_count={vocab_min_count}", flush=True)
     except Exception:
         pass
-    # 3) shuffle with retry/backoff
+    # 3) shuffle with retry/backoff (use conservative memory for shuffle)
     _last_err = None
-    for _attempt in range(2):
+    # Allow independent override for shuffle memory
+    try:
+        _shuffle_mem_env = os.environ.get("GLOVE_SHUFFLE_MEMORY_MB")
+        shuffle_memory_mb = float(_shuffle_mem_env) if _shuffle_mem_env else float(min(16384.0, float(memory_mb)))
+    except Exception:
+        shuffle_memory_mb = float(min(16384.0, float(memory_mb)))
+
+    # Plan: try decreasing shuffle memory and tightening params if needed
+    shuffle_memory_plan: List[float] = [shuffle_memory_mb, 8192.0, 4096.0]
+    tighten_plan: List[Tuple[int, int]] = [(window_size, vocab_min_count), (min(10, window_size), max(10, vocab_min_count)), (min(8, window_size), max(25, vocab_min_count))]
+
+    for _attempt, (mem_try, (win_try, minc_try)) in enumerate(zip(shuffle_memory_plan, tighten_plan)):
         try:
             with open(co_file, 'rb') as fin, open(co_shuf_file, 'wb') as fout:
-                subprocess.run([shuffle_bin, '-memory', str(memory_mb), '-verbose', '2'], stdin=fin, stdout=fout, check=True)
+                print(f"[glove] shuffle attempt={_attempt} memory_mb={mem_try}", flush=True)
+                subprocess.run([shuffle_bin, '-memory', str(mem_try), '-verbose', '2'], stdin=fin, stdout=fout, check=True)
             break
         except Exception as e:
             _last_err = e
+            # Tighten and regenerate cooccurrence, then retry with lower memory
+            window_size = int(win_try)
+            vocab_min_count = int(minc_try)
+            print(f"[glove] shuffle retry={_attempt} lowering memory to {mem_try} and regenerating cooccur with window={window_size} min_count={vocab_min_count}", flush=True)
             try:
-                memory_mb = float(min(float(memory_mb) * 2.0, 65536.0))
+                with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
+                    subprocess.run([
+                        cooccur_bin, '-memory', str(min(float(memory_mb), mem_try)), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
+                    ], stdin=fin, stdout=fout, check=True)
             except Exception:
-                memory_mb = float(65536.0)
-            window_size = min(window_size, 8)
-            vocab_min_count = max(vocab_min_count, 10)
-            print(f"[glove] shuffle retry with memory_mb={memory_mb}, window={window_size}, min_count={vocab_min_count}", flush=True)
-            with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
-                subprocess.run([
-                    cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
-                ], stdin=fin, stdout=fout, check=True)
+                pass
     else:
         raise _last_err or RuntimeError('GloVe shuffle failed after retries')
 
