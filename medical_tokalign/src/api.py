@@ -148,7 +148,7 @@ def build_glove_corpora(
         wrote, stats_src, stats_tgt = _write_from(iter_texts_fallback())
 
     # Save stats sidecars next to corpora
-    try:
+        try:
         with open(os.path.splitext(corpus_src_path)[0] + ".stats.json", "w", encoding="utf-8") as fsrc:
             json.dump(stats_src, fsrc, indent=2)
         with open(os.path.splitext(corpus_tgt_path)[0] + ".stats.json", "w", encoding="utf-8") as ftgt:
@@ -273,10 +273,10 @@ def compute_alignment(
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(td, f)
     # Save compact alignment report
-    try:
+        try:
         with open(out_path + ".report.json", "w", encoding="utf-8") as rf:
             json.dump(report, rf, indent=2)
-    except Exception:
+        except Exception:
         pass
     return out_path
 
@@ -447,14 +447,14 @@ def train_glove_vectors(
     save_file = os.path.join(glove_dir, base)
 
     # Auto-adjust min_count for tiny corpora to avoid empty/small vocabularies
-    try:
+        try:
         file_bytes = os.path.getsize(corpus_path)
         # If corpus is very small, relax min_count aggressively
         if file_bytes < 10 * 1024 * 1024:  # < 10 MB
             vocab_min_count = min(vocab_min_count, 1)
         elif file_bytes < 50 * 1024 * 1024:  # < 50 MB
             vocab_min_count = min(vocab_min_count, 2)
-    except Exception:
+        except Exception:
         pass
 
     # Allow overrides via environment for speed tuning
@@ -466,9 +466,9 @@ def train_glove_vectors(
     threads_val: int
     env_thr = os.environ.get("GLOVE_THREADS")
     if env_thr is not None:
-    try:
+        try:
             threads_val = max(1, int(env_thr))
-    except Exception:
+        except Exception:
             threads_val = max(1, (os.cpu_count() or 1) - 1)
     elif threads is not None:
         threads_val = max(1, int(threads))
@@ -543,7 +543,7 @@ def train_glove_vectors(
     if not os.path.isfile(vec_path):
         raise RuntimeError(f"Expected GloVe vectors not found: {vec_path}")
     # Emit simple coverage metadata (best-effort)
-    try:
+        try:
         meta = {
             "corpus_path": corpus_path,
             "vector_path": vec_path,
@@ -577,7 +577,7 @@ def train_glove_vectors(
         meta["meets_min_coverage"] = bool(cov >= min_cov)
         with open(f"{save_file}.meta.json", "w", encoding="utf-8") as fm:
             json.dump(meta, fm, indent=2)
-    except Exception:
+        except Exception:
         pass
     return vec_path
 
