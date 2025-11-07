@@ -156,7 +156,7 @@ Stable Entrypoints
 bash medical_tokalign/scripts/corpus_stable.sh
 
 # End-to-end: prepare-data → corpus_stable → adapt → eval
-bash medical_tokalign/scripts/autorun_stable.sh \
+bash medical_tokalign/scripts/autorun.sh \
   --model_id Qwen/Qwen2-7B \
   --top_k 8192 \
   --pivot 300 \
@@ -239,6 +239,7 @@ export CUDA_VISIBLE_DEVICES=0
 export HF_HOME=/workspace/.cache/huggingface
 cd /workspace/domain-adapt && git fetch --all --prune && git reset --hard origin/main
 bash medical_tokalign/scripts/corpus_stable.sh
-bash medical_tokalign/scripts/autorun_stable.sh --model_id Qwen/Qwen2-7B --top_k 8192 --pivot 300 --warmup_steps 0
+bash medical_tokalign/scripts/autorun.sh --model_id Qwen/Qwen2-7B --top_k 8192 --pivot 300 --warmup_steps 0
+bash medical_tokalign/scripts/autorun.sh --model_id Qwen/Qwen2-7B --top_k 8192 --pivot 300 --warmup_steps 0
 ```
 

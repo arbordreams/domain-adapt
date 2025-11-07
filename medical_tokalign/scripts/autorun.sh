@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Unified unattended autorun for MedTokAlign (TokAlign‑faithful)
+# - Prepares data and corpus (skips if present)
+# - Runs adapt with retries
+# - Gates eval on adapt success
+# - Archives artifacts and emits a manifest
+# - Optional tmux orchestration (default on)
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$ROOT_DIR/.." && pwd)"
+LOGDIR="$ROOT_DIR/runs/logs"
+mkdir -p "$LOGDIR"
+TS="$(date +%Y%m%d_%H%M%S)"
+PIPE_LOG="$LOGDIR/autorun_${TS}.log"
+
+# -------- args --------
+MODEL_ID=""
+TOP_K="8192"
+PIVOT="300"
+WARMUP_STEPS="3000"
+MAX_RETRIES="2"
+EVAL_CONFIG="$ROOT_DIR/configs/eval_medical.yaml"
+USE_TMUX="${USE_TMUX:-1}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --model_id) MODEL_ID="$2"; shift 2 ;;
+    --top_k) TOP_K="$2"; shift 2 ;;
+    --pivot) PIVOT="$2"; shift 2 ;;
+    --warmup_steps) WARMUP_STEPS="$2"; shift 2 ;;
+    --max_retries) MAX_RETRIES="$2"; shift 2 ;;
+    --eval_config) EVAL_CONFIG="$2"; shift 2 ;;
+    --no-tmux) USE_TMUX=0; shift 1 ;;
+    *) echo "Unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$MODEL_ID" ]]; then
+  echo "Usage: $0 --model_id <hf_model_id> [--top_k N] [--pivot N] [--warmup_steps N] [--max_retries N] [--no-tmux]" >&2
+  exit 2
+fi
+
+# -------- tmux orchestration --------
+if [[ -z "${TMUX:-}" && "${USE_TMUX}" != "0" ]]; then
+  # Launch a tmux session named 'autorun'
+  { tmux kill-session -t autorun 2>/dev/null || true; }
+  echo "[autorun] starting tmux session 'autorun'..."
+  tmux new -d -s autorun "bash '$0' --model_id '$MODEL_ID' --top_k '$TOP_K' --pivot '$PIVOT' --warmup_steps '$WARMUP_STEPS' --max_retries '$MAX_RETRIES' --eval_config '$EVAL_CONFIG' --no-tmux"
+  echo "[autorun] attached log: $PIPE_LOG"
+  exit 0
+fi
+
+exec &> >(tee -a "$PIPE_LOG")
+echo "[autorun] ts=$TS model_id=$MODEL_ID top_k=$TOP_K pivot=$PIVOT warmup_steps=$WARMUP_STEPS max_retries=$MAX_RETRIES"
+
+# -------- resources --------
+RAM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 131072)"
+NPROC="$(nproc 2>/dev/null || echo 20)"
+
+# Cooccur memory: 25% of RAM, clamped 4–64 GB
+: "${GLOVE_MEMORY_MB:=$(( RAM_MB / 4 ))}"
+if [[ "$GLOVE_MEMORY_MB" -lt 4096 ]]; then GLOVE_MEMORY_MB=4096; fi
+if [[ "$GLOVE_MEMORY_MB" -gt 65536 ]]; then GLOVE_MEMORY_MB=65536; fi
+
+# Shuffle memory conservative (8 GB), allow env override
+: "${GLOVE_SHUFFLE_MEMORY_MB:=8192}"
+
+# Threads = nproc - 1
+: "${GLOVE_THREADS:=$(( NPROC>1 ? NPROC-1 : 1 ))}"
+if [[ "$GLOVE_THREADS" -lt 1 ]]; then GLOVE_THREADS=1; fi
+
+export GLOVE_MEMORY_MB GLOVE_THREADS GLOVE_SHUFFLE_MEMORY_MB
+echo "[autorun] RAM_MB=$RAM_MB NPROC=$NPROC GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_SHUFFLE_MEMORY_MB=$GLOVE_SHUFFLE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
+
+# -------- cleanup vestiges (best‑effort) --------
+for s in "$ROOT_DIR/scripts/autorun_overnight.sh" "$ROOT_DIR/scripts/autorun_stable.sh"; do
+  if [[ -f "$s" ]]; then
+    echo "[autorun] removing vestige script: ${s##*/}"
+    rm -f "$s" || true
+  fi
+done
+
+# -------- archiving on exit --------
+on_exit() {
+  set +e
+  echo "[autorun] archiving artifacts..." | tee -a "$PIPE_LOG"
+  ARTIFACTS_DIR="$REPO_ROOT/artifacts"
+  mkdir -p "$ARTIFACTS_DIR/logs/run_${TS}" "$ARTIFACTS_DIR/models/run_${TS}" "$ARTIFACTS_DIR/evals/run_${TS}"
+  ADAPT_DIR=$(ls -td "$ROOT_DIR/runs/tokenizer_adapt"/* 2>/dev/null | head -n1 || true)
+  EVAL_DIR=$(ls -td "$ROOT_DIR/runs/medical_eval"/* 2>/dev/null | head -n1 || true)
+  if [[ -n "$ADAPT_DIR" && -d "$ADAPT_DIR" ]]; then cp -a "$ADAPT_DIR"/. "$ARTIFACTS_DIR/models/run_${TS}"/ || true; fi
+  if [[ -n "$EVAL_DIR" && -d "$EVAL_DIR" ]]; then cp -a "$EVAL_DIR"/. "$ARTIFACTS_DIR/evals/run_${TS}"/ || true; fi
+  if [[ -d "$ROOT_DIR/runs/logs" ]]; then cp -a "$ROOT_DIR/runs/logs"/. "$ARTIFACTS_DIR/logs/run_${TS}"/ || true; fi
+  (cd "$REPO_ROOT" && tar -czf "$ARTIFACTS_DIR/run_${TS}.tar.gz" medical_tokalign/runs/logs 2>/dev/null || true)
+  ls -lh "$ARTIFACTS_DIR/run_${TS}.tar.gz" 2>/dev/null || true
+
+  # Best‑effort LFS push (non‑fatal)
+  if command -v git >/dev/null 2>&1; then
+    (cd "$REPO_ROOT" && git lfs install && git add -A && git commit -m "autorun artifacts ${TS}" 2>/dev/null || true && git push 2>/dev/null || true)
+  fi
+}
+trap on_exit EXIT
+
+# -------- bootstrap tools --------
+if [[ ! -d "$ROOT_DIR/tools/GloVe" ]]; then
+  echo "[autorun] bootstrap GloVe..."
+  git clone https://github.com/stanfordnlp/GloVe.git "$ROOT_DIR/tools/GloVe"
+  make -C "$ROOT_DIR/tools/GloVe"
+else
+  make -C "$ROOT_DIR/tools/GloVe" || true
+fi
+
+# -------- pipeline --------
+set +e
+PREP_RC=0
+echo "[autorun] prepare-data --all"
+python -m medical_tokalign.src.cli prepare-data --all || PREP_RC=$?
+echo "[autorun] prepare rc=$PREP_RC"
+
+echo "[autorun] corpus_stable.sh (skip if exists)"
+bash "$ROOT_DIR/scripts/corpus_stable.sh" || true
+
+ADAPT_RC=1
+for retry in $(seq 0 "$MAX_RETRIES"); do
+  if [[ "$retry" -gt 0 ]]; then
+    OLD_MEM=$GLOVE_MEMORY_MB
+    GLOVE_MEMORY_MB=$(( GLOVE_MEMORY_MB * 150 / 100 ))
+    if [[ "$GLOVE_MEMORY_MB" -gt 65536 ]]; then GLOVE_MEMORY_MB=65536; fi
+    export GLOVE_MEMORY_MB
+    echo "[autorun] adapt retry $retry/$MAX_RETRIES (memory: ${OLD_MEM}MB -> ${GLOVE_MEMORY_MB}MB)"
+  else
+    echo "[autorun] adapt (attempt 1)"
+  fi
+  python -m medical_tokalign.src.cli adapt \
+    --model_id "$MODEL_ID" \
+    --top_k "$TOP_K" \
+    --pivot "$PIVOT" \
+    --warmup_steps "$WARMUP_STEPS"
+  ADAPT_RC=$?
+  echo "[autorun] adapt rc=$ADAPT_RC"
+  if [[ "$ADAPT_RC" -eq 0 ]]; then break; fi
+  sleep 10
+done
+
+EVAL_RC=-1
+if [[ "$ADAPT_RC" -eq 0 ]]; then
+  echo "[autorun] eval (adapt succeeded)"
+  python -m medical_tokalign.src.cli eval --config "$EVAL_CONFIG"
+  EVAL_RC=$?
+  echo "[autorun] eval rc=$EVAL_RC"
+else
+  echo "[autorun] skipping eval (adapt failed, rc=$ADAPT_RC)"
+fi
+
+# Manifest
+MAN="$LOGDIR/run_${TS}_manifest.json"
+{
+  echo "{"
+  echo "  \"ts\": \"${TS}\","
+  echo "  \"model_id\": \"${MODEL_ID}\","
+  echo "  \"top_k\": ${TOP_K},"
+  echo "  \"pivot\": ${PIVOT},"
+  echo "  \"warmup_steps\": ${WARMUP_STEPS},"
+  echo "  \"glove_memory_mb\": ${GLOVE_MEMORY_MB},"
+  echo "  \"glove_shuffle_memory_mb\": ${GLOVE_SHUFFLE_MEMORY_MB},"
+  echo "  \"glove_threads\": ${GLOVE_THREADS},"
+  echo "  \"prepare_rc\": ${PREP_RC},"
+  echo "  \"adapt_rc\": ${ADAPT_RC},"
+  echo "  \"eval_rc\": ${EVAL_RC}"
+  echo "}"
+} > "$MAN" || true
+echo "[autorun] manifest: $MAN"
+
+exit 0
+
+

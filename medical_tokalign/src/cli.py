@@ -236,10 +236,10 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
                             store.backfill_from_jsonl(pth, bc._hash_3gram)
             except Exception:
                 store = None
-        for s in sources_cfg:
-            if s.target_bytes <= 0:
-                continue
-            out_path = os.path.join(out_root, f"{s.name}.jsonl")
+    for s in sources_cfg:
+        if s.target_bytes <= 0:
+            continue
+        out_path = os.path.join(out_root, f"{s.name}.jsonl")
             existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
             stats = bc.build_source(
                 out_path,
@@ -253,7 +253,7 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             )
             inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
             global_written += inc
-            summary[s.name] = stats
+        summary[s.name] = stats
             _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H%M%SZ")})
 
         # Deterministic completion: don't abort if sources are exhausted
@@ -353,6 +353,7 @@ def cmd_adapt(args: argparse.Namespace) -> None:
         pivot=pivot,
         out_path=mapping_json,
         seed=int(getattr(args, "seed", 17)),
+        avoid_unk_second_best=not bool(getattr(args, "no_unk_second_best", False)),
     )
 
     # 5) Strict apply + optional warmup
@@ -474,6 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     p3.add_argument("--pivot", type=int, default=300)
     p3.add_argument("--warmup_steps", type=int, default=0)
     p3.add_argument("--seed", type=int, default=17)
+    p3.add_argument("--no_unk_second_best", action="store_true", help="Disable second-best fallback when argmax is UNK (TokAlign ablation)")
     p3.set_defaults(func=cmd_adapt)
 
     p4 = sp.add_parser("eval", help="Run medical evaluation")

@@ -159,21 +159,16 @@ def build_source(
     seen_store: Optional[object] = None,
 ) -> Dict[str, int]:
     _ensure_dir(os.path.dirname(out_path))
-
     global_seen: set[str] = seen_hashes if seen_hashes is not None else set()
     written_bytes = 0
     kept = 0
     seen = 0
-
-    # Resume: use file size only (avoid rescanning large JSONL); kept is counted for current run only
     if os.path.isfile(out_path):
         try:
             written_bytes = os.path.getsize(out_path)
         except Exception:
             written_bytes = 0
-
     eff_target_bytes = int(target_bytes_override) if target_bytes_override is not None else int(src.target_bytes)
-
     if src.kind == "hf":
         try:
             records = _iter_hf_records(src.dataset or "", src.subset, src.splits or ["train"])
@@ -193,23 +188,18 @@ def build_source(
     else:
         def gen_texts() -> Iterator[str]:
             return iter(())
-
-    # Open in append mode if resuming; otherwise write fresh (atomic via tmp)
     use_append = os.path.isfile(out_path)
     if use_append:
         f = open(out_path, "a", encoding="utf-8")
     else:
         tmp_path = out_path + ".tmp"
         f = open(tmp_path, "w", encoding="utf-8")
-
     try:
-        # Local helper to process and write a single normalized snippet
         def _write_one(snippet: str) -> None:
             nonlocal kept, written_bytes
             if len(snippet) < min_chars:
                 return
             h = _hash_3gram(snippet)
-            # Check dedup store first (if available), then in-memory set
             try:
                 if seen_store is not None and hasattr(seen_store, "exists") and seen_store.exists(h):  # type: ignore[attr-defined]
                     return
@@ -217,10 +207,9 @@ def build_source(
                 pass
             if h in global_seen:
                 return
-            # optional MinHash near-dup filtering
             if near_dup_lsh is not None:
                 try:
-                    mh, lsh = near_dup_lsh  # tuple(minhash_fn, lsh)
+                    mh, lsh = near_dup_lsh
                     m = mh(snippet)
                     if list(lsh.query(m)):
                         return
@@ -238,14 +227,12 @@ def build_source(
             f.write(line + "\n")
             kept += 1
             written_bytes += len(line.encode("utf-8"))
-            # Mark as seen (store and in-memory)
             try:
                 if seen_store is not None and hasattr(seen_store, "add"):
                     seen_store.add(h)  # type: ignore[attr-defined]
             except Exception:
                 pass
             global_seen.add(h)
-
         for raw in gen_texts():
             if written_bytes >= eff_target_bytes:
                 break
@@ -256,7 +243,6 @@ def build_source(
             if len(s) <= max_chars:
                 _write_one(s)
             else:
-                # Chunk long texts instead of skipping, with small overlap to preserve context
                 overlap = max(0, min(200, max_chars // 10))
                 step = max_chars - overlap if max_chars > overlap else max_chars
                 start = 0
@@ -274,9 +260,7 @@ def build_source(
                 if os.path.exists(tmp_path):
                     os.replace(tmp_path, out_path)
             except Exception:
-                # If tmp is missing (e.g., interrupted/cleaned), skip replace; resume later
                 pass
-
     return {"seen": seen, "kept": kept, "bytes": written_bytes}
 
 

@@ -203,6 +203,7 @@ def compute_alignment(
     pivot: int,
     out_path: str,
     seed: int = 0,
+    avoid_unk_second_best: bool = True,
 ) -> str:
     """Compute TokAlign-style 1:1 id mapping using relative GloVe representations.
 
@@ -257,7 +258,7 @@ def compute_alignment(
             continue
         lix = int(np.argmax(sim[id1_idx]))
         lid = ids2[lix]
-        if str(lid) in ("unk", "<unk>"):
+        if avoid_unk_second_best and str(lid) in ("unk", "<unk>"):
             top2 = set(np.argpartition(sim[id1_idx], -2)[-2:])
             top1 = set(np.argpartition(sim[id1_idx], -1)[-1:])
             cand = list(top2 - top1)
@@ -528,29 +529,36 @@ def train_glove_vectors(
     # Bound cooccurrence size; tighten params if oversized (check BEFORE shuffle to avoid crashes)
     # Shuffle binary is fragile with files > 1.5GB, so be very conservative
     try:
+        threshold = 1536 * 1024 * 1024  # 1.5 GB
+
+        def _regen_vocab_and_cooccur(_min_count: int, _window: int) -> int:
+            with open(corpus_path, "rb") as fin, open(vocab_file, "wb") as fout:
+                subprocess.run(
+                    [vocab_bin, "-min-count", str(_min_count), "-verbose", "2"],
+                    stdin=fin, stdout=fout, check=True,
+                )
+            with open(corpus_path, "rb") as fin, open(co_file, "wb") as fout:
+                subprocess.run(
+                    [
+                        cooccur_bin, "-memory", str(memory_mb),
+                        "-vocab-file", vocab_file, "-verbose", "2",
+                        "-window-size", str(_window),
+                    ],
+                    stdin=fin, stdout=fout, check=True,
+                )
+            return os.path.getsize(co_file) if os.path.exists(co_file) else 0
+
         _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
-        # If cooccurrence exceeds 1.5 GiB, aggressively tighten to avoid shuffle crashes
-        if _co_size > 1536 * 1024 * 1024:  # 1.5 GB threshold
-            print(f"[glove] cooccur too large: {_co_size} bytes (>1.5GB); aggressively tightening and regenerating", flush=True)
-            # Aggressive tightening: small window, high min_count
-            window_size = min(window_size, 5)
-            vocab_min_count = max(vocab_min_count, 20)
-            with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
-                subprocess.run([
-                    cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
-                ], stdin=fin, stdout=fout, check=True)
-            _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
+        if _co_size > threshold:
+            print(f"[glove] cooccur too large: {_co_size} bytes (>1.5GB); tightening and regenerating", flush=True)
+            window_size = 5
+            vocab_min_count = max(int(vocab_min_count), 20)
+            _co_size = _regen_vocab_and_cooccur(vocab_min_count, window_size)
             print(f"[glove] cooccur regenerated: size={_co_size} bytes; window={window_size} min_count={vocab_min_count}", flush=True)
-            # If still too large, tighten even more
-            if _co_size > 1536 * 1024 * 1024:
-                print(f"[glove] cooccur still large: {_co_size} bytes; further tightening", flush=True)
-                window_size = min(window_size, 3)
-                vocab_min_count = max(vocab_min_count, 30)
-                with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
-                    subprocess.run([
-                        cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
-                    ], stdin=fin, stdout=fout, check=True)
-                _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
+            if _co_size > threshold:
+                print(f"[glove] cooccur still large: {_co_size} bytes; raising min_count further", flush=True)
+                vocab_min_count = max(int(vocab_min_count), 30)
+                _co_size = _regen_vocab_and_cooccur(vocab_min_count, window_size)
                 print(f"[glove] cooccur final: size={_co_size} bytes; window={window_size} min_count={vocab_min_count}", flush=True)
     except Exception:
         pass

@@ -1,0 +1,15 @@
+# Biomedical corpus config for H100 pod (single GPU, 20 vCPU, 188 GB RAM)
+output_dir: medical_tokalign/data/biomed_corpus
+random_seed: 17
+prevent_eval_contamination: true
+near_dup: none
+target_total_bytes: 2710000000  # 2.71 GB target
+
+defaults:
+  min_chars: 200
+  max_chars: 20000
+
+# Define sources as needed. Empty by default because many pods already have a prebuilt corpus.
+sources: {}
+
+
