@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Highest-quality overnight autorun:
-# - Adapt (TokAlign-style) with strong settings
-# - Eval
+# Enhanced overnight autorun: best of both worlds
+# - Prepare data + corpus (from autorun_stable.sh)
+# - Adapt with retry logic (escalating memory for GloVe failures)
+# - Eval (gated on adapt success)
 # - Always archive logs/artifacts, push to GitHub (LFS for tarball)
+# - Auto-shutdown guards (idle + wall-time)
 # - Then shutdown the machine (even on partial failure)
 
 MODEL_ID="Qwen/Qwen2-7B"
 TOP_K=8192
 PIVOT=300
 WARMUP_STEPS=3000
+# Retry configuration
+MAX_ADAPT_RETRIES=2      # max retries for adapt step
 # Auto-shutdown guards
 IDLE_MINUTES=120       # shut down if no log activity for N minutes (default 2h)
 WALL_MINUTES=720       # hard wall-time in minutes before shutdown (default 12h)
@@ -22,6 +26,7 @@ while [[ $# -gt 0 ]]; do
     --top_k) TOP_K="$2"; shift 2;;
     --pivot) PIVOT="$2"; shift 2;;
     --warmup_steps) WARMUP_STEPS="$2"; shift 2;;
+    --max_retries) MAX_ADAPT_RETRIES="$2"; shift 2;;
     --idle_minutes) IDLE_MINUTES="$2"; shift 2;;
     --wall_minutes) WALL_MINUTES="$2"; shift 2;;
     --shutdown_delay) SHUTDOWN_DELAY="$2"; shift 2;;
@@ -39,6 +44,35 @@ export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:Tr
 export HF_HOME=${HF_HOME:-/workspace/.cache/huggingface}
 export HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER:-1}
 export HF_DATASETS_TRUST_REMOTE_CODE=${HF_DATASETS_TRUST_REMOTE_CODE:-1}
+
+# Auto-detect CPU cores and RAM for GloVe optimization
+if command -v nproc >/dev/null 2>&1; then
+  __CORES=$(nproc)
+elif command -v getconf >/dev/null 2>&1; then
+  __CORES=$(getconf _NPROCESSORS_ONLN || echo 1)
+else
+  __CORES=$(python -c "import os; print(os.cpu_count() or 1)" 2>/dev/null || echo 1)
+fi
+# Leave one core free for system
+export GLOVE_THREADS=${GLOVE_THREADS:-$(( __CORES > 1 ? __CORES - 1 : 1 ))}
+
+# Auto-size GloVe memory: 30% of RAM, clamped 8-64 GB
+if [[ -z "${GLOVE_MEMORY_MB:-}" ]]; then
+  if command -v free >/dev/null 2>&1; then
+    RAM_KB=$(free | awk '/^Mem:/ {print $2}')
+    RAM_MB=$(( RAM_KB / 1024 ))
+    GLOVE_MEM_MB=$(( RAM_MB * 30 / 100 ))
+    # Clamp between 8GB and 64GB
+    if [[ $GLOVE_MEM_MB -lt 8192 ]]; then
+      GLOVE_MEM_MB=8192
+    elif [[ $GLOVE_MEM_MB -gt 65536 ]]; then
+      GLOVE_MEM_MB=65536
+    fi
+    export GLOVE_MEMORY_MB=$GLOVE_MEM_MB
+  else
+    export GLOVE_MEMORY_MB=49152  # Default 48GB conservative
+  fi
+fi
 
 LOGDIR="$ROOT_DIR/runs/logs"
 mkdir -p "$LOGDIR"
@@ -95,8 +129,12 @@ on_exit() {
     echo "  \"idle_minutes\": $IDLE_MINUTES,"
     echo "  \"wall_minutes\": $WALL_MINUTES,"
     echo "  \"shutdown_delay\": $SHUTDOWN_DELAY,"
+    echo "  \"prepare_rc\": ${PREPARE_RC:--1},"
+    echo "  \"corpus_rc\": ${CORPUS_RC:--1},"
     echo "  \"adapt_rc\": ${ADAPT_RC:--1},"
     echo "  \"eval_rc\": ${EVAL_RC:--1},"
+    echo "  \"glove_memory_mb\": ${GLOVE_MEMORY_MB:-unknown},"
+    echo "  \"glove_threads\": ${GLOVE_THREADS:-unknown},"
     echo "  \"git_commit\": \"$GIT_COMMIT\","
     echo "  \"hostname\": \"$HOSTNAME\""
     echo "}"
@@ -151,29 +189,78 @@ WALL_PID=$!
 
 {
   echo "[overnight] START model_id=$MODEL_ID top_k=$TOP_K pivot=$PIVOT warmup=$WARMUP_STEPS"
+  echo "[overnight] GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
 
-  # Adapt
-  echo "[overnight] adapt..."
+  # 1) Prepare data (from autorun_stable.sh)
+  echo "[overnight] prepare-data --all"
   set +e
-  python -m medical_tokalign.src.cli adapt \
-    --model_id "$MODEL_ID" \
-    --top_k "$TOP_K" \
-    --pivot "$PIVOT" \
-    --warmup_steps "$WARMUP_STEPS"
-  ADAPT_RC=$?
+  python -m medical_tokalign.src.cli prepare-data --all
+  PREPARE_RC=$?
   set -e
-  echo "[overnight] adapt rc=$ADAPT_RC"
+  echo "[overnight] prepare-data rc=$PREPARE_RC"
 
-  # Eval (run even if adapt_rc!=0; logs/artifacts still saved)
-  echo "[overnight] eval..."
+  # 2) Build corpus (from autorun_stable.sh, skips if exists)
+  echo "[overnight] corpus_stable.sh"
   set +e
-  python -m medical_tokalign.src.cli eval \
-    --config "$ROOT_DIR/configs/eval_medical.yaml"
-  EVAL_RC=$?
+  bash "$ROOT_DIR/scripts/corpus_stable.sh"
+  CORPUS_RC=$?
   set -e
-  echo "[overnight] eval rc=$EVAL_RC"
+  echo "[overnight] corpus_stable rc=$CORPUS_RC"
 
-  echo "[overnight] DONE adapt_rc=$ADAPT_RC eval_rc=$EVAL_RC"
+  # 3) Adapt with retry logic (escalating memory on failure)
+  ADAPT_RC=1
+  for retry in $(seq 0 $MAX_ADAPT_RETRIES); do
+    if [[ $retry -gt 0 ]]; then
+      # Escalate memory: +50% each retry, up to 64GB
+      OLD_MEM=$GLOVE_MEMORY_MB
+      GLOVE_MEMORY_MB=$(( GLOVE_MEMORY_MB * 150 / 100 ))
+      if [[ $GLOVE_MEMORY_MB -gt 65536 ]]; then
+        GLOVE_MEMORY_MB=65536
+      fi
+      export GLOVE_MEMORY_MB
+      echo "[overnight] adapt retry $retry/$MAX_ADAPT_RETRIES (memory: ${OLD_MEM}MB -> ${GLOVE_MEMORY_MB}MB)"
+    else
+      echo "[overnight] adapt (attempt 1)"
+    fi
+
+    set +e
+    python -m medical_tokalign.src.cli adapt \
+      --model_id "$MODEL_ID" \
+      --top_k "$TOP_K" \
+      --pivot "$PIVOT" \
+      --warmup_steps "$WARMUP_STEPS"
+    ADAPT_RC=$?
+    set -e
+
+    if [[ $ADAPT_RC -eq 0 ]]; then
+      echo "[overnight] adapt succeeded (rc=0)"
+      break
+    else
+      echo "[overnight] adapt failed (rc=$ADAPT_RC)"
+      if [[ $retry -lt $MAX_ADAPT_RETRIES ]]; then
+        echo "[overnight] will retry with higher memory..."
+        sleep 10  # Brief pause before retry
+      else
+        echo "[overnight] max retries ($MAX_ADAPT_RETRIES) reached, giving up"
+      fi
+    fi
+  done
+
+  # 4) Eval (only if adapt succeeded)
+  EVAL_RC=-1
+  if [[ $ADAPT_RC -eq 0 ]]; then
+    echo "[overnight] eval (adapt succeeded)"
+    set +e
+    python -m medical_tokalign.src.cli eval \
+      --config "$ROOT_DIR/configs/eval_medical.yaml"
+    EVAL_RC=$?
+    set -e
+    echo "[overnight] eval rc=$EVAL_RC"
+  else
+    echo "[overnight] skipping eval (adapt failed, rc=$ADAPT_RC)"
+  fi
+
+  echo "[overnight] DONE prepare_rc=$PREPARE_RC corpus_rc=$CORPUS_RC adapt_rc=$ADAPT_RC eval_rc=$EVAL_RC"
 } 2>&1 | tee -a "$PIPE_LOG"
 
 
