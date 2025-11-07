@@ -45,34 +45,23 @@ export HF_HOME=${HF_HOME:-/workspace/.cache/huggingface}
 export HF_HUB_ENABLE_HF_TRANSFER=${HF_HUB_ENABLE_HF_TRANSFER:-1}
 export HF_DATASETS_TRUST_REMOTE_CODE=${HF_DATASETS_TRUST_REMOTE_CODE:-1}
 
-# Auto-detect CPU cores and RAM for GloVe optimization
-if command -v nproc >/dev/null 2>&1; then
-  __CORES=$(nproc)
-elif command -v getconf >/dev/null 2>&1; then
-  __CORES=$(getconf _NPROCESSORS_ONLN || echo 1)
-else
-  __CORES=$(python -c "import os; print(os.cpu_count() or 1)" 2>/dev/null || echo 1)
-fi
-# Leave one core free for system
-export GLOVE_THREADS=${GLOVE_THREADS:-$(( __CORES > 1 ? __CORES - 1 : 1 ))}
+# Conservative defaults for GloVe and threads
+# Use allocated vCPU count (31 for RunPod H100) or override via env
+# Default to 31 vCPU if not specified (RunPod H100 instance)
+: "${VCPU_COUNT:=31}"
+RAM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 65536)
 
-# Auto-size GloVe memory: 30% of RAM, clamped 8-64 GB
-if [[ -z "${GLOVE_MEMORY_MB:-}" ]]; then
-  if command -v free >/dev/null 2>&1; then
-    RAM_KB=$(free | awk '/^Mem:/ {print $2}')
-    RAM_MB=$(( RAM_KB / 1024 ))
-    GLOVE_MEM_MB=$(( RAM_MB * 30 / 100 ))
-    # Clamp between 8GB and 64GB
-    if [[ $GLOVE_MEM_MB -lt 8192 ]]; then
-      GLOVE_MEM_MB=8192
-    elif [[ $GLOVE_MEM_MB -gt 65536 ]]; then
-      GLOVE_MEM_MB=65536
-    fi
-    export GLOVE_MEMORY_MB=$GLOVE_MEM_MB
-  else
-    export GLOVE_MEMORY_MB=49152  # Default 48GB conservative
-  fi
-fi
+# GloVe memory: 20% of RAM (conservative), clamped 4-64 GB
+: "${GLOVE_MEMORY_MB:=$(( RAM_MB / 5 ))}"
+if [ "$GLOVE_MEMORY_MB" -lt 4096 ]; then GLOVE_MEMORY_MB=4096; fi
+if [ "$GLOVE_MEMORY_MB" -gt 65536 ]; then GLOVE_MEMORY_MB=65536; fi
+
+# GloVe threads: vCPU - 1 (leave one core free for system)
+: "${GLOVE_THREADS:=$(( VCPU_COUNT - 1 ))}"
+if [ "$GLOVE_THREADS" -lt 1 ]; then GLOVE_THREADS=1; fi
+
+export GLOVE_MEMORY_MB GLOVE_THREADS
+echo "[overnight] VCPU_COUNT=$VCPU_COUNT GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
 
 LOGDIR="$ROOT_DIR/runs/logs"
 mkdir -p "$LOGDIR"
