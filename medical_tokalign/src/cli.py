@@ -135,6 +135,15 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             )
         )
 
+    # Per-source min/max overrides (fallback to defaults)
+    per_source_minmax: dict[str, tuple[int, int]] = {}
+    for name, sc in (cfg.get("sources") or {}).items():
+        if not sc.get("enabled", True):
+            continue
+        s_min = int(sc.get("min_chars", min_chars))
+        s_max = int(sc.get("max_chars", max_chars))
+        per_source_minmax[name] = (s_min, s_max)
+
     # Monitor thread to log progress
     stop_evt = threading.Event()
     def _monitor() -> None:
@@ -172,8 +181,8 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             stats = bc.build_source(
                 out_path,
                 s,
-                min_chars=min_chars,
-                max_chars=max_chars,
+                min_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[0],
+                max_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[1],
                 rng=rng,
                 seen_hashes=global_seen,
                 near_dup_lsh=near_dup_lsh,
@@ -183,30 +192,43 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             summary[s.name] = stats
             _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
 
-        # Auto-fill remainder if requested
+        # Auto-fill remainder if requested (multi-source, round-robin)
         if getattr(args, "auto_fill", True) and target_total > 0 and global_written < target_total:
             needed = target_total - global_written
-            # Prefer pubmed_abstracts if present
-            fallback = next((s for s in sources_cfg if s.name == "pubmed_abstracts"), None) or (sources_cfg[0] if sources_cfg else None)
-            if fallback is not None:
-                out_path = os.path.join(out_root, f"{fallback.name}.jsonl")
-                existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
-                eff_target = existing_bytes + needed
-                _log(f"[info] auto-fill: allocating remaining {needed} bytes to {fallback.name}")
-                stats = bc.build_source(
-                    out_path,
-                    fallback,
-                    min_chars=min_chars,
-                    max_chars=max_chars,
-                    rng=rng,
-                    seen_hashes=global_seen,
-                    target_bytes_override=eff_target,
-                    near_dup_lsh=near_dup_lsh,
-                )
-                inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
-                global_written += inc
-                summary[fallback.name] = stats
-                _event({"source": fallback.name, "bytes": stats.get("bytes", 0), "auto_fill": True, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+            _log(f"[info] auto-fill: attempting to allocate remaining {needed} bytes across sources")
+            # Prefer pubmed_abstracts first in ordering
+            ordered = sorted(sources_cfg, key=lambda x: (x.name != "pubmed_abstracts", x.name))
+            attempts = 0
+            while needed > 0 and attempts < 3:
+                attempts += 1
+                progressed = False
+                share = max(1, needed // max(1, len(ordered)))
+                for s in ordered:
+                    out_path = os.path.join(out_root, f"{s.name}.jsonl")
+                    existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
+                    eff_target = existing_bytes + share
+                    stats = bc.build_source(
+                        out_path,
+                        s,
+                        min_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[0],
+                        max_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[1],
+                        rng=rng,
+                        seen_hashes=global_seen,
+                        target_bytes_override=eff_target,
+                        near_dup_lsh=near_dup_lsh,
+                    )
+                    inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
+                    if inc > 0:
+                        progressed = True
+                        global_written += inc
+                        needed = max(0, target_total - global_written)
+                        summary[s.name] = stats
+                        _event({"source": s.name, "bytes": stats.get("bytes", 0), "auto_fill": True, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+                        if needed <= 0:
+                            break
+                if not progressed:
+                    _log("[warn] auto-fill made no progress; stopping early")
+                    break
 
         # Write summary.json
         try:
