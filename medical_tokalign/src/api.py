@@ -525,20 +525,33 @@ def train_glove_vectors(
             check=True,
         )
 
-    # Bound cooccurrence size; tighten params if oversized
+    # Bound cooccurrence size; tighten params if oversized (check BEFORE shuffle to avoid crashes)
+    # Shuffle binary is fragile with files > 1.5GB, so be very conservative
     try:
         _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
-        # If cooccurrence grows beyond 3 GiB, proactively tighten to avoid shuffle crashes
-        if _co_size > 3 * 1024 * 1024 * 1024:
-            print(f"[glove] cooccur large: {_co_size} bytes; tightening window/min_count and regenerating", flush=True)
-            window_size = min(window_size, 8)
-            vocab_min_count = max(vocab_min_count, 10)
+        # If cooccurrence exceeds 1.5 GiB, aggressively tighten to avoid shuffle crashes
+        if _co_size > 1536 * 1024 * 1024:  # 1.5 GB threshold
+            print(f"[glove] cooccur too large: {_co_size} bytes (>1.5GB); aggressively tightening and regenerating", flush=True)
+            # Aggressive tightening: small window, high min_count
+            window_size = min(window_size, 5)
+            vocab_min_count = max(vocab_min_count, 20)
             with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
                 subprocess.run([
                     cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
                 ], stdin=fin, stdout=fout, check=True)
             _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
             print(f"[glove] cooccur regenerated: size={_co_size} bytes; window={window_size} min_count={vocab_min_count}", flush=True)
+            # If still too large, tighten even more
+            if _co_size > 1536 * 1024 * 1024:
+                print(f"[glove] cooccur still large: {_co_size} bytes; further tightening", flush=True)
+                window_size = min(window_size, 3)
+                vocab_min_count = max(vocab_min_count, 30)
+                with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
+                    subprocess.run([
+                        cooccur_bin, '-memory', str(memory_mb), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
+                    ], stdin=fin, stdout=fout, check=True)
+                _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
+                print(f"[glove] cooccur final: size={_co_size} bytes; window={window_size} min_count={vocab_min_count}", flush=True)
     except Exception:
         pass
     # 3) shuffle with retry/backoff (use conservative memory for shuffle)
@@ -550,29 +563,25 @@ def train_glove_vectors(
     except Exception:
         shuffle_memory_mb = float(min(16384.0, float(memory_mb)))
 
-    # Plan: try decreasing shuffle memory and tightening params if needed
+    # Shuffle with conservative memory (params already tightened above if needed)
+    # Try decreasing memory if first attempt fails
     shuffle_memory_plan: List[float] = [shuffle_memory_mb, 8192.0, 4096.0]
-    tighten_plan: List[Tuple[int, int]] = [(window_size, vocab_min_count), (min(10, window_size), max(10, vocab_min_count)), (min(8, window_size), max(25, vocab_min_count))]
-
-    for _attempt, (mem_try, (win_try, minc_try)) in enumerate(zip(shuffle_memory_plan, tighten_plan)):
+    for _attempt, mem_try in enumerate(shuffle_memory_plan):
         try:
+            # Check cooccurrence size before each attempt
+            _co_size_check = os.path.getsize(co_file) if os.path.exists(co_file) else 0
+            if _co_size_check > 1536 * 1024 * 1024:
+                print(f"[glove] WARNING: cooccur still {_co_size_check} bytes before shuffle attempt {_attempt}", flush=True)
             with open(co_file, 'rb') as fin, open(co_shuf_file, 'wb') as fout:
-                print(f"[glove] shuffle attempt={_attempt} memory_mb={mem_try}", flush=True)
+                print(f"[glove] shuffle attempt={_attempt} memory_mb={mem_try} cooccur_size={_co_size_check}", flush=True)
                 subprocess.run([shuffle_bin, '-memory', str(mem_try), '-verbose', '2'], stdin=fin, stdout=fout, check=True)
             break
         except Exception as e:
             _last_err = e
-            # Tighten and regenerate cooccurrence, then retry with lower memory
-            window_size = int(win_try)
-            vocab_min_count = int(minc_try)
-            print(f"[glove] shuffle retry={_attempt} lowering memory to {mem_try} and regenerating cooccur with window={window_size} min_count={vocab_min_count}", flush=True)
-            try:
-                with open(corpus_path, 'rb') as fin, open(co_file, 'wb') as fout:
-                    subprocess.run([
-                        cooccur_bin, '-memory', str(min(float(memory_mb), mem_try)), '-vocab-file', vocab_file, '-verbose', '2', '-window-size', str(window_size)
-                    ], stdin=fin, stdout=fout, check=True)
-            except Exception:
-                pass
+            if _attempt < len(shuffle_memory_plan) - 1:
+                print(f"[glove] shuffle attempt {_attempt} failed, retrying with lower memory...", flush=True)
+            else:
+                print(f"[glove] shuffle failed after all attempts", flush=True)
     else:
         raise _last_err or RuntimeError('GloVe shuffle failed after retries')
 
