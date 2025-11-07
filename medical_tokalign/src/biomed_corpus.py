@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Iterator, List, Optional
 
 import yaml
+try:
+    from .dedup_store import SeenStore  # type: ignore
+except Exception:  # pragma: no cover
+    SeenStore = None  # type: ignore
 
 
 @dataclass
@@ -152,6 +156,7 @@ def build_source(
     seen_hashes: Optional[set[str]] = None,
     target_bytes_override: Optional[int] = None,
     near_dup_lsh: Optional[object] = None,
+    seen_store: Optional[object] = None,
 ) -> Dict[str, int]:
     _ensure_dir(os.path.dirname(out_path))
 
@@ -160,26 +165,12 @@ def build_source(
     kept = 0
     seen = 0
 
-    # Resume: load existing file hashes and bytes if present
+    # Resume: use file size only (avoid rescanning large JSONL); kept is counted for current run only
     if os.path.isfile(out_path):
         try:
-            with open(out_path, "r", encoding="utf-8") as fin:
-                for line in fin:
-                    try:
-                        rec = json.loads(line)
-                        t = _norm_text(str(rec.get("text", "")))
-                        if t:
-                            global_seen.add(_hash_3gram(t))
-                            kept += 1
-                    except Exception:
-                        continue
             written_bytes = os.path.getsize(out_path)
         except Exception:
-            # If reading fails, fall back to size-only resume
-            try:
-                written_bytes = os.path.getsize(out_path)
-            except Exception:
-                written_bytes = 0
+            written_bytes = 0
 
     eff_target_bytes = int(target_bytes_override) if target_bytes_override is not None else int(src.target_bytes)
 
@@ -218,6 +209,12 @@ def build_source(
             if len(snippet) < min_chars:
                 return
             h = _hash_3gram(snippet)
+            # Check dedup store first (if available), then in-memory set
+            try:
+                if seen_store is not None and hasattr(seen_store, "exists") and seen_store.exists(h):  # type: ignore[attr-defined]
+                    return
+            except Exception:
+                pass
             if h in global_seen:
                 return
             # optional MinHash near-dup filtering
@@ -241,6 +238,12 @@ def build_source(
             f.write(line + "\n")
             kept += 1
             written_bytes += len(line.encode("utf-8"))
+            # Mark as seen (store and in-memory)
+            try:
+                if seen_store is not None and hasattr(seen_store, "add"):
+                    seen_store.add(h)  # type: ignore[attr-defined]
+            except Exception:
+                pass
             global_seen.add(h)
 
         for raw in gen_texts():
@@ -340,7 +343,7 @@ def main() -> None:
         # If preflight module missing for any reason, continue (CLI path also runs preflight)
         pass
 
-    # Global target and global dedup set
+    # Global target and global dedup set (in-memory only used when not using sqlite store)
     target_total = int(cfg.get("target_total_bytes", 0))
     global_seen: set[str] = set()
     # Optional blocklist from benchmark/eval JSONLs to prevent contamination
@@ -365,25 +368,15 @@ def main() -> None:
             pass
     summary: Dict[str, Dict[str, int]] = {}
 
-    # Preload existing files into dedup set and count bytes
+    # Count bytes only (avoid rescanning large JSONLs)
     global_written = 0
     for s in sources_cfg:
         out_path = os.path.join(out_root, f"{s.name}.jsonl")
-        if os.path.isfile(out_path):
-            try:
-                with open(out_path, "r", encoding="utf-8") as fin:
-                    for line in fin:
-                        try:
-                            rec = json.loads(line)
-                            t = _norm_text(str(rec.get("text", "")))
-                            if t:
-                                global_seen.add(_hash_3gram(t))
-                        except Exception:
-                            continue
-                b = os.path.getsize(out_path)
-                global_written += b
-            except Exception:
-                pass
+        try:
+            if os.path.isfile(out_path):
+                global_written += os.path.getsize(out_path)
+        except Exception:
+            pass
 
     # Optional MinHash near-dup (best effort)
     near_dup_lsh = None

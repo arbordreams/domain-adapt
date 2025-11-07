@@ -8,6 +8,10 @@ from typing import List, Optional
 
 from . import data_prep as dp
 from . import biomed_corpus as bc
+try:
+    from .dedup_store import SeenStore  # type: ignore
+except Exception:
+    SeenStore = None  # type: ignore
 from . import dataset_preflight as preflight
 from . import api as api
 
@@ -216,6 +220,22 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
     summary = {}
     global_written = 0
     try:
+        # Prepare dedup store (default sqlite) under output_dir
+        out_root = cfg.get("output_dir", os.path.join(_pkg_root(), "data", "biomed_corpus"))
+        dedup_backend = getattr(args, "dedup_backend", "sqlite")
+        dedup_db = getattr(args, "dedup_db", None) or os.path.join(out_root, "seen.sqlite")
+        store = None
+        if dedup_backend == "sqlite" and SeenStore is not None:
+            try:
+                store = SeenStore(dedup_db)
+                # Optional backfill: populate store from existing JSONLs once
+                if getattr(args, "backfill_store", False):
+                    for s in sources_cfg:
+                        pth = os.path.join(out_root, f"{s.name}.jsonl")
+                        if os.path.isfile(pth):
+                            store.backfill_from_jsonl(pth, bc._hash_3gram)
+            except Exception:
+                store = None
         for s in sources_cfg:
             if s.target_bytes <= 0:
                 continue
@@ -227,8 +247,9 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
                 min_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[0],
                 max_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[1],
                 rng=rng,
-                seen_hashes=global_seen,
+                seen_hashes=global_seen if dedup_backend != "sqlite" else None,
                 near_dup_lsh=near_dup_lsh,
+                seen_store=store,
             )
             inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
             global_written += inc
@@ -262,6 +283,11 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             pass
         print(json.dumps(summary, indent=2))
     finally:
+        try:
+            if 'store' in locals() and store is not None and hasattr(store, 'close'):
+                store.close()
+        except Exception:
+            pass
         stop_evt.set()
         _fp.close()
 
@@ -436,6 +462,9 @@ def build_parser() -> argparse.ArgumentParser:
     p2.add_argument("--fresh", action="store_true", help="Delete existing corpus dir before building")
     p2.add_argument("--strict_sources", action="store_true", default=True, help="Fail fast if any source is missing/inaccessible")
     p2.add_argument("--preflight_only", action="store_true", help="Run dataset preflight only and exit")
+    p2.add_argument("--dedup_backend", type=str, default="sqlite", choices=["sqlite", "memory"], help="Dedup backend (default: sqlite)")
+    p2.add_argument("--dedup_db", type=str, default=None, help="Path to dedup sqlite db (default: <output_dir>/seen.sqlite)")
+    p2.add_argument("--backfill_store", action="store_true", help="Backfill dedup store from existing JSONLs if missing")
     p2.add_argument("--logdir", type=str, default=os.path.join(_pkg_root(), "runs", "logs"))
     p2.set_defaults(func=cmd_build_corpus)
 
