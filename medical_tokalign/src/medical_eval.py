@@ -213,7 +213,9 @@ def main():
     adapted = find_latest_adapted_artifacts(search_dir) if os.path.isdir(search_dir) else None
 
     model_id = cfg.get("model_id")
-    backend = cfg.get("eval_backend", "vllm").lower()
+    # Backend precedence: env override > config (default vllm)
+    backend_env = os.environ.get("EVAL_BACKEND")
+    backend = (backend_env or cfg.get("eval_backend", "vllm")).lower()
     precision = cfg.get("precision", "bf16")
     attn_impl = cfg.get("attn_impl", "flash_attention_2")
     compile_flag = bool(cfg.get("compile", True))
@@ -284,6 +286,7 @@ def main():
         if eff_backend == "vllm":
             vllm_cfg = cfg.get("vllm", {})
             try:
+                print(f"[MedTokAlign][vLLM] cfg={json.dumps(vllm_cfg)}")
                 engine = load_vllm_engine(
                     model=var["model"],
                     tokenizer=var.get("tokenizer") or var["model"],
@@ -316,10 +319,25 @@ def main():
         per_dataset_outputs: Dict[str, List[Dict[str, str]]] = {}
         per_dataset_correct: Dict[str, List[int]] = {}
 
+        # Lightweight throughput logging (prompts/s and approx tokens/s)
+        tok_for_stats = None  # lazy
+        def _ensure_tok_for_stats():
+            nonlocal tok_for_stats, hf_tok
+            if hf_tok is not None:
+                tok_for_stats = hf_tok
+                return
+            if tok_for_stats is None:
+                try:
+                    from transformers import AutoTokenizer as _ATok
+                    tok_for_stats = _ATok.from_pretrained(var["model"], use_fast=True)
+                except Exception:
+                    tok_for_stats = None
+
         def do_generate(prompts: List[str]) -> List[str]:
             gen = cfg.get("gen", {})
+            t0 = time.time()
             if eff_backend == "vllm":
-                return vllm_generate(
+                outs = vllm_generate(
                     engine,
                     prompts,
                     max_new_tokens=int(gen.get("max_new_tokens", 64)),
@@ -328,8 +346,19 @@ def main():
                     top_k=int(gen.get("top_k", 0)),
                     stop=gen.get("stop", []) or [],
                 )
+                dt = max(1e-6, time.time() - t0)
+                _ensure_tok_for_stats()
+                tok_cnt = 0
+                if tok_for_stats is not None:
+                    try:
+                        for t in outs:
+                            tok_cnt += len(tok_for_stats(t, add_special_tokens=False).input_ids)
+                    except Exception:
+                        pass
+                print(f"[MedTokAlign][vLLM] gen: prompts={len(prompts)} time={dt:.2f}s prompts/s={len(prompts)/dt:.2f} tokens/s={(tok_cnt/dt) if tok_cnt else -1:.2f}")
+                return outs
             else:
-                return hf_generate(
+                outs = hf_generate(
                     hf_model,
                     hf_tok,
                     prompts,
@@ -340,6 +369,17 @@ def main():
                     stop=gen.get("stop", []) or [],
                     batch_size=int(cfg.get("hf", {}).get("per_device_batch_size", 4)),
                 )
+                dt = max(1e-6, time.time() - t0)
+                _ensure_tok_for_stats()
+                tok_cnt = 0
+                if tok_for_stats is not None:
+                    try:
+                        for t in outs:
+                            tok_cnt += len(tok_for_stats(t, add_special_tokens=False).input_ids)
+                    except Exception:
+                        pass
+                print(f"[MedTokAlign][HF] gen: prompts={len(prompts)} time={dt:.2f}s prompts/s={len(prompts)/dt:.2f} tokens/s={(tok_cnt/dt) if tok_cnt else -1:.2f}")
+                return outs
 
         # PubMedQA
         if _ds_enabled("pubmedqa"):

@@ -169,7 +169,23 @@ done
 
 EVAL_RC=-1
 if [[ "$ADAPT_RC" -eq 0 ]]; then
+  # Post-adapt pruning of heavy intermediates (keep vectors and models)
+  echo "[autorun] pruning heavy GloVe intermediates and per-run corpora..."
+  # Delete global cooccurrence binaries (safe after vectors are emitted)
+  find "$ROOT_DIR/tools/GloVe" -maxdepth 1 -type f -name 'cooccurrence.*.bin' -delete 2>/dev/null || true
+  find "$ROOT_DIR/tools/GloVe" -maxdepth 1 -type f -name 'cooccurrence.shuf.*.bin' -delete 2>/dev/null || true
+  # Delete per-run glove corpora in the latest tokenizer_adapt dir (vectors are in tools/GloVe)
+  LATEST_ADAPT_DIR="$(ls -td "$ROOT_DIR/runs/tokenizer_adapt"/* 2>/dev/null | head -n1 || true)"
+  if [[ -n "$LATEST_ADAPT_DIR" && -d "$LATEST_ADAPT_DIR" ]]; then
+    rm -f "$LATEST_ADAPT_DIR/glove_source.txt" "$LATEST_ADAPT_DIR/glove_target.txt" 2>/dev/null || true
+  fi
+
   echo "[autorun] eval (adapt succeeded)"
+  # Prefer vLLM by default; allow override via EVAL_BACKEND env
+  if [[ -z "${EVAL_BACKEND:-}" ]]; then
+    EVAL_BACKEND="vllm"
+  fi
+  export EVAL_BACKEND
   python -m medical_tokalign.src.cli eval --config "$EVAL_CONFIG"
   EVAL_RC=$?
   echo "[autorun] eval rc=$EVAL_RC"
@@ -189,12 +205,29 @@ MAN="$LOGDIR/run_${TS}_manifest.json"
   echo "  \"glove_memory_mb\": ${GLOVE_MEMORY_MB},"
   echo "  \"glove_shuffle_memory_mb\": ${GLOVE_SHUFFLE_MEMORY_MB},"
   echo "  \"glove_threads\": ${GLOVE_THREADS},"
+  echo "  \"eval_backend\": \"${EVAL_BACKEND:-unknown}\","
   echo "  \"prepare_rc\": ${PREP_RC},"
   echo "  \"adapt_rc\": ${ADAPT_RC},"
   echo "  \"eval_rc\": ${EVAL_RC}"
   echo "}"
 } > "$MAN" || true
 echo "[autorun] manifest: $MAN"
+
+# Update artifacts index (append)
+INDEX_DIR="$REPO_ROOT/artifacts/runs"
+mkdir -p "$INDEX_DIR"
+INDEX_PATH="$INDEX_DIR/index.jsonl"
+{
+  echo -n "{"
+  echo -n "\"ts\":\"${TS}\",\"model_id\":\"${MODEL_ID}\",\"eval_backend\":\"${EVAL_BACKEND:-unknown}\","
+  # capture sizes (best-effort)
+  ADAPT_DIR=$(ls -td "$ROOT_DIR/runs/tokenizer_adapt"/* 2>/dev/null | head -n1 || true)
+  EVAL_DIR=$(ls -td "$ROOT_DIR/runs/medical_eval"/* 2>/dev/null | head -n1 || true)
+  ADAPT_SZ=$(du -s "$ADAPT_DIR" 2>/dev/null | awk '{print $1}' || echo 0)
+  EVAL_SZ=$(du -s "$EVAL_DIR" 2>/dev/null | awk '{print $1}' || echo 0)
+  echo -n "\"adapt_dir\":\"${ADAPT_DIR:-}\",\"adapt_kb\":${ADAPT_SZ},\"eval_dir\":\"${EVAL_DIR:-}\",\"eval_kb\":${EVAL_SZ}"
+  echo "}"
+} >> "$INDEX_PATH" 2>/dev/null || true
 
 exit 0
 

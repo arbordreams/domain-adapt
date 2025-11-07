@@ -15,7 +15,7 @@ sentencepiece>=0.2.1
 # Inference backends
 # vLLM is optional and may not have wheels for all CUDA/Torch combos
 # Install manually if available for your environment; pipeline will fall back to HF if absent
-# vllm>=0.6.2
+vllm>=0.6.2
 # Optional: TensorRT-LLM (install manually if desired)
 
 # Performance
