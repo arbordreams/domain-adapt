@@ -281,14 +281,14 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
         except Exception:
             pass
         print(json.dumps(summary, indent=2))
-    finally:
-        try:
-            if 'store' in locals() and store is not None and hasattr(store, 'close'):
-                store.close()
-        except Exception:
-            pass
-        stop_evt.set()
-        _fp.close()
+    # Cleanup resources and stop monitor thread
+    try:
+        if 'store' in locals() and store is not None and hasattr(store, 'close'):
+            store.close()
+    except Exception:
+        pass
+    stop_evt.set()
+    _fp.close()
 
 
 def cmd_adapt(args: argparse.Namespace) -> None:
