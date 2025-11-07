@@ -26,17 +26,32 @@ sources:
     splits: [train, validation, test]
     # Try multiple common fields across alternatives
     text_fields: [article, abstract, text]
-    target_bytes: 2000000000   # ~2.0 GB
+    target_bytes: 1500000000   # ~1.5 GB
+    min_chars: 200
+    max_chars: 20000
+
+  ccdv_pubmed_summ:
+    enabled: true
+    type: hf
+    dataset: ccdv/pubmed-summarization
+    name: null
+    splits: [train, validation]
+    text_fields: [article, abstract]
+    target_bytes: 1500000000   # ~1.5 GB
+    min_chars: 200
+    max_chars: 20000
 
   pubmedqa_text:
     enabled: true
     type: hf
     dataset: pubmed_qa
-    # Use the larger unlabeled split to reach byte budget
-    name: pqa_unlabeled
-    splits: [train]
+    # Prefer labeled split for longer contexts
+    name: pqa_labeled
+    splits: [train, validation]
     text_fields: [context, long_answer, question]
-    target_bytes: 2000000000   # ~2.0 GB
+    target_bytes: 700000000    # ~0.7 GB
+    min_chars: 120
+    max_chars: 20000
 
   meddialog_en:
     enabled: false
@@ -48,22 +63,26 @@ sources:
     target_bytes: 500000000     # ~0.5 GB
 
   medquad:
-    enabled: false
+    enabled: true
     type: hf
     dataset: emilyalsentzer/MedQuAD
     name: null
-    splits: [train, validation, test]
+    splits: [train]
     text_fields: [text, question, answer]
     target_bytes: 200000000     # ~0.2 GB
+    min_chars: 80
+    max_chars: 20000
 
   mashqa:
-    enabled: false
+    enabled: true
     type: hf
     dataset: UCAS2/MASHQA
     name: null
-    splits: [train, validation, test]
+    splits: [train]
     text_fields: [question, context, answer, text]
     target_bytes: 100000000     # ~0.1 GB
+    min_chars: 80
+    max_chars: 20000
 
   wikipedia_med:
     enabled: false
