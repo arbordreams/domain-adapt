@@ -543,7 +543,7 @@ def train_glove_vectors(
     if not os.path.isfile(vec_path):
         raise RuntimeError(f"Expected GloVe vectors not found: {vec_path}")
     # Emit simple coverage metadata (best-effort)
-        try:
+    try:
         meta = {
             "corpus_path": corpus_path,
             "vector_path": vec_path,
@@ -577,7 +577,7 @@ def train_glove_vectors(
         meta["meets_min_coverage"] = bool(cov >= min_cov)
         with open(f"{save_file}.meta.json", "w", encoding="utf-8") as fm:
             json.dump(meta, fm, indent=2)
-        except Exception:
+    except Exception:
         pass
     return vec_path
 
