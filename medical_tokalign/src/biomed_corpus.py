@@ -397,7 +397,12 @@ def main() -> None:
     # Persist summary.json alongside printing
     try:
         with open(os.path.join(out_root, "summary.json"), "w", encoding="utf-8") as fsum:
-            json.dump({"total_bytes": global_written, "sources": summary}, fsum, indent=2)
+            json.dump({
+                "total_bytes": global_written,
+                "target_total_bytes": target_total,
+                "complete": bool(target_total > 0 and global_written >= target_total),
+                "sources": summary
+            }, fsum, indent=2)
     except Exception:
         pass
 

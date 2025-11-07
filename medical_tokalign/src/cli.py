@@ -39,20 +39,17 @@ def cmd_prepare_data(args: argparse.Namespace) -> None:
 
 
 def cmd_build_corpus(args: argparse.Namespace) -> None:
-    # Build balanced biomedical corpus according to YAML config
+    # Robust, file-backed corpus builder with optional auto-fill to target bytes
     cfg_path = os.path.abspath(args.config)
     if not os.path.isfile(cfg_path):
         raise SystemExit(f"Config not found: {cfg_path}")
-    # Call library routine directly to avoid shelling out
-    # Replicates biomed_corpus.main() without arg parsing
-    import yaml
+
+    import yaml, json, shutil, threading, time as _t, random
 
     with open(cfg_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     seed = int(cfg.get("random_seed", 17))
-    import random
-
     rng = random.Random(seed)
     out_root = cfg.get("output_dir", os.path.join(_pkg_root(), "data", "biomed_corpus"))
     defaults = cfg.get("defaults", {})
@@ -60,7 +57,66 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
     max_chars = int(defaults.get("max_chars", 20000))
     prevent_contam = bool(cfg.get("prevent_eval_contamination", False))
     near_dup_mode = str(cfg.get("near_dup", "none")).lower()
+    target_total = int(cfg.get("target_total_bytes", 0))
 
+    # Fresh start if requested
+    if getattr(args, "fresh", False) and os.path.isdir(out_root):
+        shutil.rmtree(out_root, ignore_errors=True)
+    os.makedirs(out_root, exist_ok=True)
+
+    # Logging (file-backed, no tmux/tee required)
+    logdir = getattr(args, "logdir", None) or os.path.join(_pkg_root(), "runs", "logs")
+    os.makedirs(logdir, exist_ok=True)
+    ts = _t.strftime("%Y%m%d_%H%M%S")
+    text_log = os.path.join(logdir, f"corpus_{ts}.log")
+    jsonl_log = os.path.join(logdir, f"corpus_{ts}.jsonl")
+    _fp = open(text_log, "a", encoding="utf-8", buffering=1)
+    def _log(line: str) -> None:
+        sys.stdout.write(line + "\n"); sys.stdout.flush(); _fp.write(line + "\n")
+    def _event(ev: dict) -> None:
+        try:
+            with open(jsonl_log, "a", encoding="utf-8") as jf:
+                jf.write(json.dumps(ev) + "\n")
+        except Exception:
+            pass
+
+    # Optional contamination blocklist (best-effort)
+    global_seen: set[str] = set()
+    if prevent_contam:
+        try:
+            bench_dir = os.path.join(os.path.dirname(out_root), "..", "medical", "benchmarks")
+            if os.path.isdir(bench_dir):
+                for name in sorted(os.listdir(bench_dir)):
+                    if not name.endswith(".jsonl"):
+                        continue
+                    pth = os.path.join(bench_dir, name)
+                    with open(pth, "r", encoding="utf-8") as f:
+                        for line in f:
+                            try:
+                                rec = json.loads(line)
+                                t = bc._norm_text(str(rec.get("text", "") or rec.get("context", "") or rec.get("question", "")))
+                                if t:
+                                    global_seen.add(bc._hash_3gram(t))
+                            except Exception:
+                                continue
+        except Exception:
+            pass
+
+    # Near-dup option
+    near_dup_lsh = None
+    if near_dup_mode == "minhash":
+        try:
+            from datasketch import MinHash, MinHashLSH
+            def _mh(text: str) -> object:
+                m = MinHash(num_perm=64)
+                for w in set((text or "").lower().split()):
+                    m.update(w.encode("utf-8"))
+                return m
+            near_dup_lsh = (_mh, MinHashLSH(threshold=0.9, num_perm=64))
+        except Exception:
+            near_dup_lsh = None
+
+    # Build list of sources
     sources_cfg: List[bc.SourceCfg] = []
     for name, sc in (cfg.get("sources") or {}).items():
         if not sc.get("enabled", True):
@@ -79,58 +135,94 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             )
         )
 
-    os.makedirs(out_root, exist_ok=True)
+    # Monitor thread to log progress
+    stop_evt = threading.Event()
+    def _monitor() -> None:
+        last = ""
+        while not stop_evt.is_set():
+            try:
+                total = 0
+                for root, _d, files in os.walk(out_root):
+                    for fn in files:
+                        try:
+                            total += os.path.getsize(os.path.join(root, fn))
+                        except Exception:
+                            pass
+                pct = (total / target_total * 100.0) if target_total > 0 else 0.0
+                line = f"[corpus] {total/1e9:.2f} GB" + (f" / {target_total/1e9:.2f} GB ({pct:.1f}%)" if target_total > 0 else "")
+                if line != last:
+                    _log(line)
+                    _event({"progress": "corpus", "bytes": total, "target": target_total, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+                    last = line
+            except Exception:
+                pass
+            stop_evt.wait(15.0)
+
+    mon = threading.Thread(target=_monitor, daemon=True)
+    mon.start()
+
     summary = {}
-    # Optional contamination blocklist (best-effort)
-    global_seen: set[str] = set()
-    if prevent_contam:
+    global_written = 0
+    try:
+        for s in sources_cfg:
+            if s.target_bytes <= 0:
+                continue
+            out_path = os.path.join(out_root, f"{s.name}.jsonl")
+            existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
+            stats = bc.build_source(
+                out_path,
+                s,
+                min_chars=min_chars,
+                max_chars=max_chars,
+                rng=rng,
+                seen_hashes=global_seen,
+                near_dup_lsh=near_dup_lsh,
+            )
+            inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
+            global_written += inc
+            summary[s.name] = stats
+            _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+
+        # Auto-fill remainder if requested
+        if getattr(args, "auto_fill", True) and target_total > 0 and global_written < target_total:
+            needed = target_total - global_written
+            # Prefer pubmed_abstracts if present
+            fallback = next((s for s in sources_cfg if s.name == "pubmed_abstracts"), None) or (sources_cfg[0] if sources_cfg else None)
+            if fallback is not None:
+                out_path = os.path.join(out_root, f"{fallback.name}.jsonl")
+                existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
+                eff_target = existing_bytes + needed
+                _log(f"[info] auto-fill: allocating remaining {needed} bytes to {fallback.name}")
+                stats = bc.build_source(
+                    out_path,
+                    fallback,
+                    min_chars=min_chars,
+                    max_chars=max_chars,
+                    rng=rng,
+                    seen_hashes=global_seen,
+                    target_bytes_override=eff_target,
+                    near_dup_lsh=near_dup_lsh,
+                )
+                inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
+                global_written += inc
+                summary[fallback.name] = stats
+                _event({"source": fallback.name, "bytes": stats.get("bytes", 0), "auto_fill": True, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+
+        # Write summary.json
         try:
-            bench_dir = os.path.join(os.path.dirname(out_root), "..", "medical", "benchmarks")
-            if os.path.isdir(bench_dir):
-                for name in sorted(os.listdir(bench_dir)):
-                    if not name.endswith(".jsonl"):
-                        continue
-                    pth = os.path.join(bench_dir, name)
-                    with open(pth, "r", encoding="utf-8") as f:
-                        for line in f:
-                            try:
-                                rec = __import__("json").loads(line)
-                                t = bc._norm_text(str(rec.get("text", "") or rec.get("context", "") or rec.get("question", "")))
-                                if t:
-                                    global_seen.add(bc._hash_3gram(t))
-                            except Exception:
-                                continue
+            with open(os.path.join(out_root, "summary.json"), "w", encoding="utf-8") as fsum:
+                json.dump({
+                    "total_bytes": global_written,
+                    "target_total_bytes": target_total,
+                    "complete": bool(target_total > 0 and global_written >= target_total),
+                    "sources": summary
+                }, fsum, ensure_ascii=False, indent=2)
         except Exception:
             pass
-
-    near_dup_lsh = None
-    if near_dup_mode == "minhash":
-        try:
-            from datasketch import MinHash, MinHashLSH
-            def _mh(text: str) -> object:
-                m = MinHash(num_perm=64)
-                for w in set((text or "").lower().split()):
-                    m.update(w.encode("utf-8"))
-                return m
-            near_dup_lsh = (_mh, MinHashLSH(threshold=0.9, num_perm=64))
-        except Exception:
-            near_dup_lsh = None
-
-    for s in sources_cfg:
-        if s.target_bytes <= 0:
-            continue
-        out_path = os.path.join(out_root, f"{s.name}.jsonl")
-        stats = bc.build_source(
-            out_path,
-            s,
-            min_chars=min_chars,
-            max_chars=max_chars,
-            rng=rng,
-            seen_hashes=global_seen,
-            near_dup_lsh=near_dup_lsh,
-        )
-        summary[s.name] = stats
-    print(__import__("json").dumps(summary, indent=2))
+        print(json.dumps(summary, indent=2))
+    finally:
+        stop_evt.set()
+        _fp.close()
 
 
 def cmd_adapt(args: argparse.Namespace) -> None:
@@ -300,6 +392,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p2 = sp.add_parser("build-corpus", help="Build balanced biomedical corpus from YAML config")
     p2.add_argument("--config", type=str, required=True)
+    p2.add_argument("--fresh", action="store_true", help="Delete existing corpus dir before building")
+    p2.add_argument("--auto_fill", action="store_true", default=True, help="Auto-fill remaining bytes to reach target_total_bytes")
+    p2.add_argument("--no-auto_fill", dest="auto_fill", action="store_false")
+    p2.add_argument("--logdir", type=str, default=os.path.join(_pkg_root(), "runs", "logs"))
     p2.set_defaults(func=cmd_build_corpus)
 
     p3 = sp.add_parser("adapt", help="Run TokAlign-style tokenizer adaptation end-to-end")

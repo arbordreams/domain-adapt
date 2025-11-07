@@ -130,6 +130,27 @@ ls -l medical_tokalign/runs/logs/pipeline_*.{log,jsonl}
 cat medical_tokalign/runs/logs/pipeline_*_summary.json
 ```
 
+Robust Corpus Build (file-backed logging)
+```
+# Fresh or resumable, with auto-fill to reach target_total_bytes
+python -m medical_tokalign.src.cli build-corpus \
+  --config medical_tokalign/configs/corpus_biomed.yaml \
+  --fresh \
+  --auto_fill \
+  --logdir medical_tokalign/runs/logs
+
+# Outputs
+# - medical_tokalign/data/biomed_corpus/*.jsonl
+# - medical_tokalign/data/biomed_corpus/summary.json (complete flag)
+# - medical_tokalign/runs/logs/corpus_<ts>.{log,jsonl}
+```
+
+Maintenance / Cleanup (RunPod)
+```
+# Kill sessions/processes and clean vestiges; add --fresh-corpus to delete corpus dir
+bash medical_tokalign/scripts/clean_runpod.sh --fresh-corpus
+```
+
 TokAlign‑style Adaptation Summary
 - Build alignment matrix A between medical terms and observed token bundles from the base tokenizer on medical corpora.
 - Score each term by expected fragmentation reduction × frequency × boundary consistency.

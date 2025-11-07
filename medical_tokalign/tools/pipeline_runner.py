@@ -124,6 +124,40 @@ def preflight(telem: Telemetry, skip_bootstrap: bool) -> None:
             telem=telem,
             extra_env=env,
         )
+def _pid_is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _acquire_lock(telem: Telemetry) -> Optional[str]:
+    locks_dir = os.path.join(_pkg_root(), "runs", "locks")
+    os.makedirs(locks_dir, exist_ok=True)
+    lock_path = os.path.join(locks_dir, "pipeline.lock")
+    try:
+        if os.path.isfile(lock_path):
+            with open(lock_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            pid = int(data.get("pid", 0))
+            if pid and _pid_is_running(pid):
+                telem.write_text(f"[{_now()}] Another pipeline appears to be running (pid={pid}); aborting")
+                return None
+        with open(lock_path, "w", encoding="utf-8") as f:
+            json.dump({"pid": os.getpid(), "ts": _now()}, f)
+        return lock_path
+    except Exception:
+        return None
+
+
+def _release_lock(lock_path: Optional[str]) -> None:
+    if lock_path and os.path.isfile(lock_path):
+        try:
+            os.remove(lock_path)
+        except Exception:
+            pass
+
 
 
 def run_step(
@@ -281,9 +315,17 @@ def main() -> None:
     logs_dir = os.path.join(_pkg_root(), "runs", "logs")
     telem = Telemetry(logs_dir=logs_dir)
     summary: Dict[str, Dict] = {"started_at": _now(), "steps": {}}
+    lock_path: Optional[str] = None
     try:
         # preflight + optional bootstrap
         preflight(telem, skip_bootstrap=bool(args.skip_bootstrap))
+
+        # single-run lock
+        lock_path = _acquire_lock(telem)
+        if lock_path is None:
+            telem.write_text(f"[{_now()}] Could not acquire pipeline lock; exiting")
+            telem.write_summary({"locked": True, "finished_at": _now(), "exit_code": 1})
+            sys.exit(1)
 
         # Step 1: prepare-data
         code, dur = run_step(
@@ -321,6 +363,21 @@ def main() -> None:
             stop_evt.set()
         if code != 0:
             raise SystemExit(code)
+        # Validate corpus completeness (best-effort)
+        try:
+            cfg = _read_yaml(args.corpus_config)
+            out_dir = cfg.get("output_dir") or os.path.join(_pkg_root(), "data", "biomed_corpus")
+            target = int(cfg.get("target_total_bytes", 0))
+            summ = {}
+            p = os.path.join(out_dir, "summary.json")
+            if os.path.isfile(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    summ = json.load(f)
+            total = int(summ.get("total_bytes", 0)) if summ else _sum_bytes(out_dir)
+            if target > 0 and total < target:
+                telem.write_text(f"[{_now()}] [warn] corpus under target: {total} < {target} bytes; continuing")
+        except Exception:
+            pass
         summary["steps"]["build-corpus"] = {"code": code, "duration_s": round(dur, 2)}
 
         # Step 3: adapt (TokAlign-style)
@@ -374,6 +431,7 @@ def main() -> None:
         sys.exit(1)
     finally:
         telem.close()
+        _release_lock(lock_path)
 
 
 if __name__ == "__main__":
