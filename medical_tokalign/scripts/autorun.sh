@@ -74,6 +74,20 @@ if [[ "$GLOVE_THREADS" -lt 1 ]]; then GLOVE_THREADS=1; fi
 export GLOVE_MEMORY_MB GLOVE_THREADS GLOVE_SHUFFLE_MEMORY_MB
 echo "[autorun] RAM_MB=$RAM_MB NPROC=$NPROC GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_SHUFFLE_MEMORY_MB=$GLOVE_SHUFFLE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
 
+# Alignment BLAS threading (modest speedup, safe defaults)
+# Derive ALIGN_THREADS ~= NPROC/2, clamped [4,16], overridable via env
+if [[ -z "${ALIGN_THREADS:-}" ]]; then
+  _align_tmp=$(( NPROC/2 ))
+  if [[ "$_align_tmp" -lt 4 ]]; then _align_tmp=4; fi
+  if [[ "$_align_tmp" -gt 16 ]]; then _align_tmp=16; fi
+  ALIGN_THREADS="$_align_tmp"
+fi
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-$ALIGN_THREADS}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-$ALIGN_THREADS}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-$ALIGN_THREADS}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-$ALIGN_THREADS}"
+echo "[autorun] ALIGN_THREADS=$ALIGN_THREADS (OMP/MKL/OPENBLAS/NUMEXPR)"
+
 # -------- cleanup vestiges (best‑effort) --------
 for s in "$ROOT_DIR/scripts/autorun_overnight.sh" "$ROOT_DIR/scripts/autorun_stable.sh"; do
   if [[ -f "$s" ]]; then
