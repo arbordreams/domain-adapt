@@ -447,14 +447,14 @@ def train_glove_vectors(
     save_file = os.path.join(glove_dir, base)
 
     # Auto-adjust min_count for tiny corpora to avoid empty/small vocabularies
-        try:
+    try:
         file_bytes = os.path.getsize(corpus_path)
         # If corpus is very small, relax min_count aggressively
         if file_bytes < 10 * 1024 * 1024:  # < 10 MB
             vocab_min_count = min(vocab_min_count, 1)
         elif file_bytes < 50 * 1024 * 1024:  # < 50 MB
             vocab_min_count = min(vocab_min_count, 2)
-        except Exception:
+    except Exception:
         pass
 
     # Allow overrides via environment for speed tuning
