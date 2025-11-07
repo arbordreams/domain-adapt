@@ -466,9 +466,9 @@ def train_glove_vectors(
     threads_val: int
     env_thr = os.environ.get("GLOVE_THREADS")
     if env_thr is not None:
-        try:
+    try:
             threads_val = max(1, int(env_thr))
-        except Exception:
+    except Exception:
             threads_val = max(1, (os.cpu_count() or 1) - 1)
     elif threads is not None:
         threads_val = max(1, int(threads))

@@ -264,6 +264,8 @@ def build_source(
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build balanced biomedical corpus (~5 GB)")
     ap.add_argument("--config", type=str, required=True)
+    ap.add_argument("--strict_sources", action="store_true", default=True)
+    ap.add_argument("--preflight_only", action="store_true", default=False)
     args = ap.parse_args()
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -297,6 +299,30 @@ def main() -> None:
         )
 
     os.makedirs(out_root, exist_ok=True)
+
+    # Preflight validation (fail fast on missing/inaccessible sources if strict)
+    try:
+        from . import dataset_preflight as preflight  # type: ignore[no-redef]
+        specs = []
+        for s in sources_cfg:
+            specs.append((
+                s.name,
+                preflight.SourceSpec(
+                    dataset=s.dataset or "",
+                    subset=s.subset,
+                    splits=s.splits or ["train"],
+                    text_fields=s.text_fields or ["text"],
+                ),
+            ))
+        ok, reports = preflight.preflight_sources(specs, strict=bool(getattr(args, "strict_sources", True)))
+        print(preflight.format_reports(reports))
+        if getattr(args, "preflight_only", False):
+            return
+        if getattr(args, "strict_sources", True) and not ok:
+            raise SystemExit("Preflight failed for one or more sources (strict-sources). Aborting.")
+    except Exception:
+        # If preflight module missing for any reason, continue (CLI path also runs preflight)
+        pass
 
     # Global target and global dedup set
     target_total = int(cfg.get("target_total_bytes", 0))

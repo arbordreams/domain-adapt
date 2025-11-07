@@ -130,13 +130,19 @@ ls -l medical_tokalign/runs/logs/pipeline_*.{log,jsonl}
 cat medical_tokalign/runs/logs/pipeline_*_summary.json
 ```
 
-Robust Corpus Build (file-backed logging)
+Robust Corpus Build (preflight + deterministic, file-backed logging)
 ```
-# Fresh or resumable, with auto-fill to reach target_total_bytes
+# Optional preflight-only (validates datasets/splits/fields; does not write)
+python -m medical_tokalign.src.cli build-corpus \
+  --config medical_tokalign/configs/corpus_biomed.yaml \
+  --preflight_only \
+  --logdir medical_tokalign/runs/logs
+
+# Fresh or resumable strict build (fails fast if any source missing; no autofill)
 python -m medical_tokalign.src.cli build-corpus \
   --config medical_tokalign/configs/corpus_biomed.yaml \
   --fresh \
-  --auto_fill \
+  --strict_sources \
   --logdir medical_tokalign/runs/logs
 
 # Outputs

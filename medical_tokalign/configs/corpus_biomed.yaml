@@ -41,46 +41,47 @@ sources:
     min_chars: 200
     max_chars: 20000
 
-  pubmedqa_text:
+  pubmedqa:
     enabled: true
     type: hf
-    dataset: pubmed_qa
-    # Prefer labeled split for longer contexts
-    name: pqa_labeled
-    splits: [train, validation]
+    dataset: qiaojin/PubMedQA
+    name: null
+    splits: [train, dev, test]
     text_fields: [context, long_answer, question]
-    target_bytes: 700000000    # ~0.7 GB
+    target_bytes: 200000000    # ~0.2 GB
     min_chars: 120
     max_chars: 20000
 
-  meddialog_en:
-    enabled: false
-    type: hf
-    dataset: bigbio/pubmed_qa  # placeholder - disable if not available
-    name: null
-    splits: [train, validation, test]
-    text_fields: [dialogue, text, conversation]
-    target_bytes: 500000000     # ~0.5 GB
-
-  medquad:
+  pubmed_rct:
     enabled: true
     type: hf
-    dataset: emilyalsentzer/MedQuAD
+    dataset: zj88zj/PubMed_200k_RCT
+    name: null
+    splits: [train, validation, test]
+    text_fields: [text]
+    target_bytes: 400000000     # ~0.4 GB
+    min_chars: 60
+    max_chars: 20000
+
+  meddialog:
+    enabled: true
+    type: hf
+    dataset: bigbio/meddialog
     name: null
     splits: [train]
-    text_fields: [text, question, answer]
-    target_bytes: 200000000     # ~0.2 GB
+    text_fields: [text, dialogue, conversation]
+    target_bytes: 100000000     # ~0.1 GB
     min_chars: 80
     max_chars: 20000
 
   mashqa:
-    enabled: true
+    enabled: false
     type: hf
     dataset: UCAS2/MASHQA
     name: null
     splits: [train]
     text_fields: [question, context, answer, text]
-    target_bytes: 100000000     # ~0.1 GB
+    target_bytes: 100000000
     min_chars: 80
     max_chars: 20000
 

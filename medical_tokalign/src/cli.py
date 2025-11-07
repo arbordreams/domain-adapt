@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from . import data_prep as dp
 from . import biomed_corpus as bc
+from . import dataset_preflight as preflight
 from . import api as api
 
 
@@ -144,6 +145,34 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
         s_max = int(sc.get("max_chars", max_chars))
         per_source_minmax[name] = (s_min, s_max)
 
+    # Preflight (fail fast if any source is missing/inaccessible)
+    strict_sources = bool(getattr(args, "strict_sources", True))
+    preflight_specs: list[tuple[str, preflight.SourceSpec]] = []
+    for s in sources_cfg:
+        preflight_specs.append(
+            (
+                s.name,
+                preflight.SourceSpec(
+                    dataset=s.dataset or "",
+                    subset=s.subset,
+                    splits=s.splits or ["train"],
+                    text_fields=s.text_fields or ["text"],
+                ),
+            )
+        )
+    ok, reports = preflight.preflight_sources(preflight_specs, strict=strict_sources)
+    rep_txt = preflight.format_reports(reports)
+    for line in rep_txt.splitlines():
+        _log(f"[preflight] {line}")
+    _event({"preflight": True, "ok": ok, "strict": strict_sources, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    if getattr(args, "preflight_only", False):
+        _log("[preflight] preflight-only requested; exiting after checks")
+        stop_evt.set(); _fp.close()
+        return
+    if strict_sources and not ok:
+        stop_evt.set(); _fp.close()
+        raise SystemExit("Preflight failed for one or more sources (strict-sources). Aborting.")
+
     # Monitor thread to log progress
     stop_evt = threading.Event()
     def _monitor() -> None:
@@ -190,45 +219,12 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
             inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
             global_written += inc
             summary[s.name] = stats
-            _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
+            _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H%M%SZ")})
 
-        # Auto-fill remainder if requested (multi-source, round-robin)
-        if getattr(args, "auto_fill", True) and target_total > 0 and global_written < target_total:
-            needed = target_total - global_written
-            _log(f"[info] auto-fill: attempting to allocate remaining {needed} bytes across sources")
-            # Prefer pubmed_abstracts first in ordering
-            ordered = sorted(sources_cfg, key=lambda x: (x.name != "pubmed_abstracts", x.name))
-            attempts = 0
-            while needed > 0 and attempts < 3:
-                attempts += 1
-                progressed = False
-                share = max(1, needed // max(1, len(ordered)))
-                for s in ordered:
-                    out_path = os.path.join(out_root, f"{s.name}.jsonl")
-                    existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
-                    eff_target = existing_bytes + share
-                    stats = bc.build_source(
-                        out_path,
-                        s,
-                        min_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[0],
-                        max_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[1],
-                        rng=rng,
-                        seen_hashes=global_seen,
-                        target_bytes_override=eff_target,
-                        near_dup_lsh=near_dup_lsh,
-                    )
-                    inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
-                    if inc > 0:
-                        progressed = True
-                        global_written += inc
-                        needed = max(0, target_total - global_written)
-                        summary[s.name] = stats
-                        _event({"source": s.name, "bytes": stats.get("bytes", 0), "auto_fill": True, "ts": _t.strftime("%Y-%m-%dT%H:%M:%SZ")})
-                        if needed <= 0:
-                            break
-                if not progressed:
-                    _log("[warn] auto-fill made no progress; stopping early")
-                    break
+        # Deterministic completion: fail if we didn't reach the global target
+        if target_total > 0 and global_written < target_total and strict_sources:
+            _log(f"[error] built {global_written} bytes < target {target_total} bytes (strict-sources). Aborting.")
+            raise SystemExit(1)
 
         # Write summary.json
         try:
@@ -415,8 +411,8 @@ def build_parser() -> argparse.ArgumentParser:
     p2 = sp.add_parser("build-corpus", help="Build balanced biomedical corpus from YAML config")
     p2.add_argument("--config", type=str, required=True)
     p2.add_argument("--fresh", action="store_true", help="Delete existing corpus dir before building")
-    p2.add_argument("--auto_fill", action="store_true", default=True, help="Auto-fill remaining bytes to reach target_total_bytes")
-    p2.add_argument("--no-auto_fill", dest="auto_fill", action="store_false")
+    p2.add_argument("--strict_sources", action="store_true", default=True, help="Fail fast if any source is missing/inaccessible")
+    p2.add_argument("--preflight_only", action="store_true", help="Run dataset preflight only and exit")
     p2.add_argument("--logdir", type=str, default=os.path.join(_pkg_root(), "runs", "logs"))
     p2.set_defaults(func=cmd_build_corpus)
 
