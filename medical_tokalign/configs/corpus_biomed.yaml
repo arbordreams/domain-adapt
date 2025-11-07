@@ -1,0 +1,87 @@
+# Balanced biomedical corpus configuration (~5 GB total)
+# Notes:
+# - Each source has a byte budget target. The builder will randomly subsample/stream
+#   to approximately meet the target without duplications.
+# - Sources are intentionally diverse (research, clinical-style, conversational).
+# - Replace or extend dataset IDs as needed for your environment.
+
+random_seed: 17
+target_total_bytes: 4000000000  # enforce at least ~4 GB total across sources
+output_dir: medical_tokalign/data/biomed_corpus
+prevent_eval_contamination: true   # avoid leaking benchmark texts into training corpus
+near_dup: none                     # none | minhash (requires datasketch)
+
+defaults:
+  min_chars: 200          # skip too-short snippets
+  max_chars: 20000        # skip overly long blobs
+  lang: en                # language filter when available
+
+sources:
+  pubmed_abstracts:
+    enabled: true
+    type: hf
+    # Use the widely available scientific_papers dataset (PubMed subset)
+    dataset: scientific_papers
+    name: pubmed
+    splits: [train, validation, test]
+    # Try multiple common fields across alternatives
+    text_fields: [article, abstract, text]
+    target_bytes: 2000000000   # ~2.0 GB
+
+  pubmedqa_text:
+    enabled: true
+    type: hf
+    dataset: pubmed_qa
+    # Use the larger unlabeled split to reach byte budget
+    name: pqa_unlabeled
+    splits: [train]
+    text_fields: [context, long_answer, question]
+    target_bytes: 2000000000   # ~2.0 GB
+
+  meddialog_en:
+    enabled: false
+    type: hf
+    dataset: bigbio/pubmed_qa  # placeholder - disable if not available
+    name: null
+    splits: [train, validation, test]
+    text_fields: [dialogue, text, conversation]
+    target_bytes: 500000000     # ~0.5 GB
+
+  medquad:
+    enabled: false
+    type: hf
+    dataset: emilyalsentzer/MedQuAD
+    name: null
+    splits: [train, validation, test]
+    text_fields: [text, question, answer]
+    target_bytes: 200000000     # ~0.2 GB
+
+  mashqa:
+    enabled: false
+    type: hf
+    dataset: UCAS2/MASHQA
+    name: null
+    splits: [train, validation, test]
+    text_fields: [question, context, answer, text]
+    target_bytes: 100000000     # ~0.1 GB
+
+  wikipedia_med:
+    enabled: false
+    type: hf
+    dataset: wikimedia/wikipedia
+    name: 20231101.en
+    splits: [train]
+    text_fields: [text]
+    # Optional filtering can be applied in the builder (title/category regex)
+    target_bytes: 150000000     # ~0.15 GB
+
+  mesh_drugbank_desc:
+    enabled: false
+    type: http_list
+    # Provide direct text URLs when available (fallback small budget)
+    urls:
+      - https://example.com/mesh_descriptions_sample.txt
+      - https://example.com/drugbank_descriptions_sample.txt
+    target_bytes: 100000000     # ~0.1 GB
+
+

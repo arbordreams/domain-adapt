@@ -1,0 +1,83 @@
+name: Push Model and Tokenizer to Hugging Face Hub
+
+on:
+  workflow_dispatch:
+    inputs:
+      hf_repo:
+        description: 'HF repo (e.g., user/model-name)'
+        required: true
+      run_dir:
+        description: 'Path to adapted run dir (default: latest under medical_tokalign/runs/tokenizer_adapt)'
+        required: false
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  push-hf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install huggingface_hub
+
+      - name: Resolve run dir
+        id: rd
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.run_dir || '' }}" ]; then
+            echo "run_dir=${{ github.event.inputs.run_dir }}" >> $GITHUB_OUTPUT
+          else
+            latest=$(ls -1d medical_tokalign/runs/tokenizer_adapt/* 2>/dev/null | tail -n1 || true)
+            if [ -z "$latest" ]; then
+              echo "No adapted runs found" >&2
+              exit 1
+            fi
+            echo "run_dir=$latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload to HF Hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_REPO: ${{ github.event.inputs.hf_repo }}
+          RUN_DIR: ${{ steps.rd.outputs.run_dir }}
+        run: |
+          python - <<'PY'
+import os, sys
+from huggingface_hub import HfApi, create_repo, upload_folder
+
+repo_id = os.environ.get('HF_REPO')
+run_dir = os.environ.get('RUN_DIR')
+if not repo_id or not run_dir:
+    print('Missing HF_REPO or RUN_DIR', file=sys.stderr)
+    sys.exit(1)
+
+api = HfApi()
+try:
+    create_repo(repo_id=repo_id, private=True, exist_ok=True, token=os.environ.get('HF_TOKEN'))
+except Exception as e:
+    print('create_repo warn:', e)
+
+model_dir = os.path.join(run_dir, 'model')
+tok_dir = os.path.join(run_dir, 'tokenizer')
+if not os.path.isdir(model_dir):
+    print('model dir missing:', model_dir, file=sys.stderr)
+    sys.exit(1)
+
+upload_folder(repo_id=repo_id, folder_path=model_dir, path_in_repo='', commit_message=f'Upload model from {run_dir}')
+if os.path.isdir(tok_dir):
+    upload_folder(repo_id=repo_id, folder_path=tok_dir, path_in_repo='tokenizer', commit_message=f'Upload tokenizer from {run_dir}')
+print('Uploaded to HF:', repo_id)
+PY
+
+

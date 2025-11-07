@@ -1,0 +1,23 @@
+
+# Local caches
+__pycache__/
+*.ipynb_checkpoints/
+medical_tokalign/runs/
+.tools/
+.venv/
+.env/
+
+# Cursor IDE artifacts
+.cursor/
+.cursor
+.cursorignore
+.cursorrules
+
+# ignore keys and OS cruft
+.DS_Store
+id_rsa*
+id_ed25519*
+*.pem
+*.pub
+sebastienk
+sebastienk.pub

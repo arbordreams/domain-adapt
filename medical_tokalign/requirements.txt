@@ -1,0 +1,55 @@
+# Core (install torch/torchvision/torchaudio from PyTorch index matching your CUDA; do not pin here)
+# torch
+# torchaudio
+# torchvision
+# triton
+
+# Transformer stack (compatible with Py3.12 and recent torch)
+transformers>=4.57,<4.60
+tokenizers>=0.22.1,<0.23
+accelerate>=1.11.0,<2
+# Note: HF datasets current stable major is 2.x. Pin <3 for broad compatibility.
+datasets>=2.19.0,<3
+sentencepiece>=0.2.1
+
+# Inference backends
+# vLLM is optional and may not have wheels for all CUDA/Torch combos
+# Install manually if available for your environment; pipeline will fall back to HF if absent
+# vllm>=0.6.2
+# Optional: TensorRT-LLM (install manually if desired)
+
+# Performance
+# flash-attn (ensure CUDA-compatible wheel; see bootstrap script)
+flash-attn
+einops>=0.8.0
+
+# Parameter-efficient finetuning (optional warmup of new rows)
+peft>=0.12.0
+
+# Metrics & NLP
+evaluate>=0.4.3
+sacrebleu>=2.4.3
+rouge-score>=0.1.2
+seqeval>=1.2.2
+scikit-learn>=1.5.2
+
+# Biomedical NLP
+scispacy>=0.5.4
+spacy>=3.7.5
+# Optional direct install of SciSpacy model (can also be installed in script)
+# en_core_sci_lg @ https://github.com/allenai/scispacy/releases/download/v0.5.4/en_core_sci_lg-0.5.4-py3-none-any.whl
+
+# Utilities
+PyYAML>=6.0.2
+tqdm>=4.66.5
+numpy>=1.26.4
+scipy>=1.13.1
+pandas>=2.2.3
+ujson>=5.10.0
+orjson>=3.10.7
+psutil>=5.9.8
+pynvml>=11.5.0
+
+# Notebooks are not required for the pipeline
+
+

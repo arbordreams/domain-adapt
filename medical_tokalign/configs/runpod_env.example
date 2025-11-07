@@ -1,0 +1,17 @@
+# RunPod environment example for one H100 PCIe 80GB
+export CUDA_VISIBLE_DEVICES=0
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export HF_HOME=/workspace/.cache/huggingface
+export HF_HUB_ENABLE_HF_TRANSFER=1
+
+# Note: HF_TOKEN is already set in the RunPod environment; no mapping needed.
+# If you need to map explicitly, uncomment below:
+# if [ -n "$HUGGINGFACE_TOKEN" ] && [ -z "$HF_TOKEN" ]; then
+#   export HF_TOKEN="$HUGGINGFACE_TOKEN"
+#   export HUGGINGFACE_HUB_TOKEN="$HUGGINGFACE_TOKEN"
+# fi
+
+# Optional: SciSpacy model wheel URL (if not installed already)
+# export SCISPACY_MODEL_URL=https://github.com/allenai/scispacy/releases/download/v0.5.4/en_core_sci_lg-0.5.4-py3-none-any.whl
+
+

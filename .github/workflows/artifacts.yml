@@ -1,0 +1,41 @@
+name: Package MedTokAlign Run Artifacts
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create archive of runs
+        run: |
+          mkdir -p dist
+          if [ -d medical_tokalign/runs ]; then
+            tar -czf dist/medtokalign-runs.tar.gz medical_tokalign/runs || true
+          else
+            echo "No runs directory present; creating empty archive"
+            tar -czf dist/medtokalign-runs.tar.gz --files-from /dev/null
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: medtokalign-runs
+          path: dist/medtokalign-runs.tar.gz
+
+      - name: Create GitHub Release (if tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/medtokalign-runs.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+

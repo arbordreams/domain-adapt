@@ -1,0 +1,18 @@
+# Optional defaults for unattended runner
+
+model_id: Qwen/Qwen2-7B
+corpus_config: medical_tokalign/configs/corpus_biomed.yaml
+eval_config: medical_tokalign/configs/eval_medical.yaml
+
+top_k: 8192
+pivot: 300
+warmup_steps: 0
+
+# Hints for monitoring and control
+target_total_bytes_hint: 4000000000
+step_timeout_s: 28800   # 8 hours
+max_retries: 1
+skip_bootstrap: false
+enable_tmux: false
+
+

@@ -1,0 +1,18 @@
+# Unified pipeline configuration (optional convenience)
+
+model_id: Qwen/Qwen2-7B
+
+# Build-corpus step
+corpus_config: medical_tokalign/configs/corpus_biomed.yaml
+
+# Adaptation parameters
+adapt:
+  top_k: 8192
+  pivot: 300
+  warmup_steps: 0
+  seed: 17
+
+# Evaluation step
+eval_config: medical_tokalign/configs/eval_medical.yaml
+
+
