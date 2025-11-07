@@ -253,7 +253,7 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
         inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
         global_written += inc
         summary[s.name] = stats
-        _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime(\"%Y-%m-%dT%H%M%SZ\")})
+        _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime('%Y-%m-%dT%H%M%SZ')})
 
         # Deterministic completion: don't abort if sources are exhausted
         if target_total > 0 and strict_sources and global_written < target_total:
