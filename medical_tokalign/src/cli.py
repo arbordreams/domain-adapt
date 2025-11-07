@@ -219,42 +219,41 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
 
     summary = {}
     global_written = 0
-    try:
-        # Prepare dedup store (default sqlite) under output_dir
-        out_root = cfg.get("output_dir", os.path.join(_pkg_root(), "data", "biomed_corpus"))
-        dedup_backend = getattr(args, "dedup_backend", "sqlite")
-        dedup_db = getattr(args, "dedup_db", None) or os.path.join(out_root, "seen.sqlite")
-        store = None
-        if dedup_backend == "sqlite" and SeenStore is not None:
-            try:
-                store = SeenStore(dedup_db)
-                # Optional backfill: populate store from existing JSONLs once
-                if getattr(args, "backfill_store", False):
-                    for s in sources_cfg:
-                        pth = os.path.join(out_root, f"{s.name}.jsonl")
-                        if os.path.isfile(pth):
-                            store.backfill_from_jsonl(pth, bc._hash_3gram)
-            except Exception:
-                store = None
+    # Prepare dedup store (default sqlite) under output_dir
+    out_root = cfg.get("output_dir", os.path.join(_pkg_root(), "data", "biomed_corpus"))
+    dedup_backend = getattr(args, "dedup_backend", "sqlite")
+    dedup_db = getattr(args, "dedup_db", None) or os.path.join(out_root, "seen.sqlite")
+    store = None
+    if dedup_backend == "sqlite" and SeenStore is not None:
+        try:
+            store = SeenStore(dedup_db)
+            # Optional backfill: populate store from existing JSONLs once
+            if getattr(args, "backfill_store", False):
+                for s in sources_cfg:
+                    pth = os.path.join(out_root, f"{s.name}.jsonl")
+                    if os.path.isfile(pth):
+                        store.backfill_from_jsonl(pth, bc._hash_3gram)
+        except Exception:
+            store = None
     for s in sources_cfg:
         if s.target_bytes <= 0:
             continue
         out_path = os.path.join(out_root, f"{s.name}.jsonl")
-            existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
-            stats = bc.build_source(
-                out_path,
-                s,
-                min_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[0],
-                max_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[1],
-                rng=rng,
-                seen_hashes=global_seen if dedup_backend != "sqlite" else None,
-                near_dup_lsh=near_dup_lsh,
-                seen_store=store,
-            )
-            inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
-            global_written += inc
+        existing_bytes = os.path.getsize(out_path) if os.path.isfile(out_path) else 0
+        stats = bc.build_source(
+            out_path,
+            s,
+            min_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[0],
+            max_chars=per_source_minmax.get(s.name, (min_chars, max_chars))[1],
+            rng=rng,
+            seen_hashes=global_seen if dedup_backend != "sqlite" else None,
+            near_dup_lsh=near_dup_lsh,
+            seen_store=store,
+        )
+        inc = max(0, int(stats.get("bytes", 0)) - int(existing_bytes))
+        global_written += inc
         summary[s.name] = stats
-            _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime("%Y-%m-%dT%H%M%SZ")})
+        _event({"source": s.name, "bytes": stats.get("bytes", 0), "kept": stats.get("kept", 0), "seen": stats.get("seen", 0), "ts": _t.strftime(\"%Y-%m-%dT%H%M%SZ\")})
 
         # Deterministic completion: don't abort if sources are exhausted
         if target_total > 0 and strict_sources and global_written < target_total:
