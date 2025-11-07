@@ -246,9 +246,17 @@ def build_source(
                     _write_one(piece)
                     start += step
     finally:
-        f.close()
+        try:
+            f.close()
+        except Exception:
+            pass
         if not use_append:
-            os.replace(tmp_path, out_path)
+            try:
+                if os.path.exists(tmp_path):
+                    os.replace(tmp_path, out_path)
+            except Exception:
+                # If tmp is missing (e.g., interrupted/cleaned), skip replace; resume later
+                pass
 
     return {"seen": seen, "kept": kept, "bytes": written_bytes}
 
