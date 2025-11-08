@@ -57,25 +57,48 @@ echo "[autorun] ts=$TS model_id=$MODEL_ID top_k=$TOP_K pivot=$PIVOT warmup_steps
 
 # -------- resources --------
 RAM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 131072)"
-NPROC="$(nproc 2>/dev/null || echo 20)"
 
-# Cooccur memory: 25% of RAM, clamped 4–64 GB
-: "${GLOVE_MEMORY_MB:=$(( RAM_MB / 4 ))}"
+# Detect actual allocated vCPUs (prefer cgroup quota over nproc logical cores)
+# This is critical for cloud instances where nproc shows all logical cores but quota is limited
+ALLOCATED_VCPUS=20  # Default fallback
+if [[ -f /sys/fs/cgroup/cpu/cpu.cfs_quota_us ]] && [[ -f /sys/fs/cgroup/cpu/cpu.cfs_period_us ]]; then
+  QUOTA=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us 2>/dev/null || echo "-1")
+  PERIOD=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us 2>/dev/null || echo "100000")
+  if [[ "$QUOTA" != "-1" ]] && [[ "$PERIOD" -gt 0 ]]; then
+    ALLOCATED_VCPUS=$((QUOTA / PERIOD))
+  fi
+fi
+# Fallback to nproc if cgroup unavailable, but clamp to reasonable max for cloud instances
+if [[ "$ALLOCATED_VCPUS" -lt 1 ]] || [[ "$ALLOCATED_VCPUS" -gt 200 ]]; then
+  NPROC_LOGICAL="$(nproc 2>/dev/null || echo 20)"
+  # If nproc shows many cores but we're on a cloud instance, be conservative
+  if [[ "$NPROC_LOGICAL" -gt 100 ]]; then
+    ALLOCATED_VCPUS=20  # Conservative default for cloud
+  else
+    ALLOCATED_VCPUS="$NPROC_LOGICAL"
+  fi
+fi
+NPROC="$ALLOCATED_VCPUS"
+
+# Cooccur memory: 30% of RAM (increased from 25% for better performance), clamped 4–64 GB
+: "${GLOVE_MEMORY_MB:=$(( RAM_MB * 3 / 10 ))}"
 if [[ "$GLOVE_MEMORY_MB" -lt 4096 ]]; then GLOVE_MEMORY_MB=4096; fi
 if [[ "$GLOVE_MEMORY_MB" -gt 65536 ]]; then GLOVE_MEMORY_MB=65536; fi
 
-# Shuffle memory conservative (8 GB), allow env override
+# Shuffle memory: conservative 8 GB, allow env override
 : "${GLOVE_SHUFFLE_MEMORY_MB:=8192}"
 
-# Threads = nproc - 1
+# GloVe threads: allocated vCPUs - 1 (leave one core for system)
 : "${GLOVE_THREADS:=$(( NPROC>1 ? NPROC-1 : 1 ))}"
 if [[ "$GLOVE_THREADS" -lt 1 ]]; then GLOVE_THREADS=1; fi
+# Cap at 64 threads to avoid excessive context switching
+if [[ "$GLOVE_THREADS" -gt 64 ]]; then GLOVE_THREADS=64; fi
 
 export GLOVE_MEMORY_MB GLOVE_THREADS GLOVE_SHUFFLE_MEMORY_MB
-echo "[autorun] RAM_MB=$RAM_MB NPROC=$NPROC GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_SHUFFLE_MEMORY_MB=$GLOVE_SHUFFLE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
+echo "[autorun] RAM_MB=$RAM_MB ALLOCATED_VCPUS=$NPROC GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_SHUFFLE_MEMORY_MB=$GLOVE_SHUFFLE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
 
 # Alignment BLAS threading (modest speedup, safe defaults)
-# Derive ALIGN_THREADS ~= NPROC/2, clamped [4,16], overridable via env
+# Derive ALIGN_THREADS ~= allocated_vCPUs/2, clamped [4,16], overridable via env
 if [[ -z "${ALIGN_THREADS:-}" ]]; then
   _align_tmp=$(( NPROC/2 ))
   if [[ "$_align_tmp" -lt 4 ]]; then _align_tmp=4; fi
