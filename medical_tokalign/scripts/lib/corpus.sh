@@ -41,7 +41,7 @@ PY
 
 _make_quick_overlay() {
   local in_cfg="$1"; local out_cfg="$2"
-  # Reduce target_total_bytes and per-source target_bytes
+  # Reduce target_total_bytes and per-source target_bytes; disable problematic sources
   if ! command -v python >/dev/null 2>&1; then
     cp "${in_cfg}" "${out_cfg}"
     return 0
@@ -56,8 +56,14 @@ cfg['defaults']['max_chars'] = int(cfg['defaults'].get('max_chars', 20000))
 # cap totals to ~20MB overall; per-source to 5–20MB range
 cfg['target_total_bytes'] = int(min(20_000_000, int(cfg.get('target_total_bytes', 20_000_000))))
 srcs = cfg.get('sources', {}) or {}
+# Disable sources known to require scripts (datasets 3.x incompatible)
+problematic = ['meddialog', 'ccdv_pubmed_summ']
 for k, sc in srcs.items():
     if not isinstance(sc, dict): 
+        continue
+    # Disable problematic sources in quick mode
+    if k in problematic:
+        sc['enabled'] = False
         continue
     tb = int(sc.get('target_bytes', 0))
     if tb <= 0:
@@ -88,10 +94,8 @@ build_corpus() {
       return 0
     fi
   fi
-  # Preflight (best-effort in quick mode). Also disable hf_transfer to avoid missing package errors.
-  if [ "${quick}" = "1" ]; then
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --preflight_only ) || true
-  else
+  # Preflight (best-effort in quick mode; skip entirely to avoid script-based dataset errors)
+  if [ "${quick}" != "1" ]; then
     ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --preflight_only ) || {
       error "Preflight failed for ${use_cfg}"
       return 2
@@ -99,7 +103,10 @@ build_corpus() {
   fi
   # Run build (non-strict in quick mode to tolerate partial availability)
   if [ "${quick}" = "1" ]; then
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" )
+    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" ) || {
+      warn "Build-corpus had errors in quick mode; continuing anyway"
+      return 0
+    }
   else
     ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --strict_sources )
   fi
