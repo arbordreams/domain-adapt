@@ -4,9 +4,9 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-# Resolve repo root (two levels up from this file)
+# Resolve repo root (three levels up from this file: scripts/lib → scripts → medical_tokalign → repo root)
 _SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${_SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${_SCRIPT_DIR}/../../.." && pwd)"
 PROJECT_DIR="${REPO_ROOT}/medical_tokalign"
 RUNS_DIR="${PROJECT_DIR}/runs"
 LOCKS_DIR="${RUNS_DIR}/locks"
