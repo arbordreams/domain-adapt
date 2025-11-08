@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from typing import Dict, List, Optional, Tuple, Union
+from collections import deque
 
 
 RunnerCmd = Union[List[str], str]
@@ -176,6 +177,8 @@ def run_step(
 
     attempt = 0
     last_code = 0
+    # Track recent output lines to classify errors as retryable vs fatal
+    lines_tail: deque[str] = deque(maxlen=200)
     while True:
         attempt += 1
         telem.write_event({
@@ -215,14 +218,39 @@ def run_step(
         try:
             end_by = time.time() + timeout_s if timeout_s and timeout_s > 0 else None
             while True:
-                try:
+                # Drain any currently available lines quickly to reduce race with completion
+                drained_any = False
+                while True:
+                    try:
+                        line = q.get_nowait()
+                        telem.write_text(line)
+                        lines_tail.append(line)
+                        drained_any = True
+                    except queue.Empty:
+                        break
+                if not drained_any:
+                    try:
+                        # If nothing was immediately available, block briefly for next line
                     line = q.get(timeout=0.25)
                     telem.write_text(line)
+                        lines_tail.append(line)
                 except queue.Empty:
                     pass
                 if end_by and time.time() > end_by:
                     raise TimeoutError(f"step '{name}' timed out after {timeout_s}s")
-                if proc.poll() is not None and q.empty() and stopped.is_set():
+                # Improved completion detection: wait for process exit and pump thread to finish,
+                # then drain any remaining lines to avoid missing tail output.
+                if proc.poll() is not None:
+                    # Ensure the pump has observed EOF and exited
+                    t.join(timeout=0.5)
+                    # Final drain
+                    while True:
+                        try:
+                            line = q.get_nowait()
+                            telem.write_text(line)
+                            lines_tail.append(line)
+                        except queue.Empty:
+                            break
                     code = int(proc.returncode)
                     break
             duration = time.time() - started_at
@@ -250,9 +278,30 @@ def run_step(
             "status": "finished", "code": last_code, "duration_s": round(duration, 3),
         })
 
+        # Classify errors to avoid unnecessary retries on fatal conditions
+        # Retryable: common transient network/HF issues; Fatal: missing deps, not found, OOM, etc.
+        lower_tail = "\n".join(lines_tail).lower()
+        transient_markers = [
+            "read timed out", "timed out", "connection reset", "connection reset by peer",
+            "temporary failure in name resolution", "network is unreachable",
+            "502 bad gateway", "503 service unavailable", "504 gateway timeout",
+            "remotedisconnected", "ratelimit", "rate limit", "retrying", "connectionerror",
+        ]
+        fatal_markers = [
+            "modulenotfounderror", "no module named", "importerror", "command not found",
+            "filenotfounderror", "no such file or directory", "cuda initialization error",
+            "cuda driver version", "out of memory", "permission denied", "killed",
+        ]
+        is_timeout = (last_code == 124)
+        is_transient = is_timeout or any(m in lower_tail for m in transient_markers)
+        is_fatal = any(m in lower_tail for m in fatal_markers)
+
         if last_code == 0:
             return last_code, duration
         if attempt > retries:
+            return last_code, duration
+        if is_fatal:
+            telem.write_text(f"[{_now()}] [fatal] '{name}' appears non-retryable; not retrying")
             return last_code, duration
         # backoff
         time.sleep(min(60, 5 * attempt))
@@ -331,7 +380,8 @@ def main() -> None:
         # Step 1: prepare-data
         code, dur = run_step(
             name="prepare-data",
-            cmd=["/bin/bash", os.path.join(_pkg_root(), "scripts", "prepare_medical_data.sh"), "--all"],
+            # Use CLI directly via Python to avoid relying on removed script
+            cmd=[sys.executable, "-m", "medical_tokalign.src.cli", "prepare-data", "--all"],
             timeout_s=max(30 * 60, args.step_timeout // 8),
             retries=args.max_retries,
             telem=telem,
@@ -364,7 +414,8 @@ def main() -> None:
             stop_evt.set()
         if code != 0:
             raise SystemExit(code)
-        # Validate corpus completeness (best-effort)
+        # Validate corpus completeness before proceeding to adapt.
+        # Fail if clearly underfilled to avoid wasting compute on adaptation.
         try:
             cfg = _read_yaml(args.corpus_config)
             out_dir = cfg.get("output_dir") or os.path.join(_pkg_root(), "data", "biomed_corpus")
@@ -375,8 +426,17 @@ def main() -> None:
                 with open(p, "r", encoding="utf-8") as f:
                     summ = json.load(f)
             total = int(summ.get("total_bytes", 0)) if summ else _sum_bytes(out_dir)
+            # Require at least 10% of target or a 5MB floor; warn if under target but above floor.
+            min_required = max(5_000_000, int(0.10 * target)) if target > 0 else 5_000_000
+            if total < min_required:
+                telem.write_text(
+                    f"[{_now()}] [error] corpus too small: {total} bytes < minimum {min_required} bytes"
+                )
+                raise SystemExit(3)
             if target > 0 and total < target:
-                telem.write_text(f"[{_now()}] [warn] corpus under target: {total} < {target} bytes; continuing")
+                telem.write_text(f"[{_now()}] [warn] corpus under target: {total} < {target} bytes")
+        except SystemExit:
+            raise
         except Exception:
             pass
         summary["steps"]["build-corpus"] = {"code": code, "duration_s": round(dur, 2)}
