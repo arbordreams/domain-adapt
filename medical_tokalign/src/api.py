@@ -557,9 +557,11 @@ def train_glove_vectors(
         )
 
     # Bound cooccurrence size; tighten params if oversized (check BEFORE shuffle to avoid crashes)
-    # Shuffle binary is fragile with files > 1.5GB, so be very conservative
+    # Shuffle binary is fragile with files > 1GB, so be very conservative
+    # For fast runs, use even tighter threshold (800MB)
     try:
-        threshold = 1536 * 1024 * 1024  # 1.5 GB
+        _fast_run = os.environ.get("FAST_RUN", "0") == "1"
+        threshold = (800 * 1024 * 1024) if _fast_run else (1536 * 1024 * 1024)  # 800 MB for fast, 1.5 GB otherwise
 
         def _regen_vocab_and_cooccur(_min_count: int, _window: int) -> int:
             with open(corpus_path, "rb") as fin, open(vocab_file, "wb") as fout:
