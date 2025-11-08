@@ -123,12 +123,12 @@ def check_source(spec: SourceSpec) -> SourceReport:
                 try:
                     ds_obj = load_dataset(ds, sb, streaming=True, trust_remote_code=True, **dargs)  # type: ignore[call-arg]
                 except TypeError:
-                    ds_obj = load_dataset(ds, sb, streaming=True, **dargs)
+                ds_obj = load_dataset(ds, sb, streaming=True, **dargs)
             else:
                 try:
                     ds_obj = load_dataset(ds, streaming=True, trust_remote_code=True, **dargs)  # type: ignore[call-arg]
                 except TypeError:
-                    ds_obj = load_dataset(ds, streaming=True, **dargs)
+                ds_obj = load_dataset(ds, streaming=True, **dargs)
             # Pull one sample
             it = iter(ds_obj)
             ex = next(it, None)
