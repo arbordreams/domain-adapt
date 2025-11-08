@@ -10,7 +10,7 @@ _corpus_root_from_cfg() {
   local cfg="$1"
   local def="${PROJECT_DIR}/data/biomed_corpus"
   if command -v python >/dev/null 2>&1; then
-    python - <<PY 2>/dev/null || echo "${def}"
+    python - "$cfg" <<PY 2>/dev/null || echo "${def}"
 import sys, os, yaml
 cfg = yaml.safe_load(open(sys.argv[1], 'r', encoding='utf-8'))
 out = cfg.get('output_dir') or os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'data', 'biomed_corpus')
@@ -25,7 +25,7 @@ _summary_complete() {
   local sjson="$1"
   if [ ! -f "${sjson}" ]; then return 1; fi
   if command -v python >/dev/null 2>&1; then
-    python - <<PY 2>/dev/null
+    python - "$sjson" <<PY 2>/dev/null
 import sys, json
 try:
   s=json.load(open(sys.argv[1],'r',encoding='utf-8'))
@@ -46,7 +46,7 @@ _make_quick_overlay() {
     cp "${in_cfg}" "${out_cfg}"
     return 0
   fi
-  python - <<PY
+  python - "${in_cfg}" "${out_cfg}" <<PY
 import sys, yaml
 inp, outp = sys.argv[1], sys.argv[2]
 cfg = yaml.safe_load(open(inp, 'r', encoding='utf-8'))
