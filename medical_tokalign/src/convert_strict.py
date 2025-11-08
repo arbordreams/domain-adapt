@@ -10,12 +10,16 @@ _EMBED_DICT = {
     "gpt_neox": "gpt_neox.embed_in.weight",
     "llama": "model.embed_tokens.weight",
     "mistral": "model.embed_tokens.weight",
+    "qwen2": "model.embed_tokens.weight",
+    "qwen2_moe": "model.embed_tokens.weight",
 }
 
 _LMHEAD_DICT = {
     "gpt_neox": "embed_out.weight",
     "llama": "lm_head.weight",
     "mistral": "lm_head.weight",
+    "qwen2": "lm_head.weight",
+    "qwen2_moe": "lm_head.weight",
 }
 
 
