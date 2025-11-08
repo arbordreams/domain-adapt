@@ -31,6 +31,130 @@ def _now() -> str:
     return dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class StatusEmitter:
+    """
+    Periodically emits structured status updates to stdout (JSONL) and to Telemetry JSONL.
+    Also emits immediately on stage/substage change or when forced.
+    """
+    def __init__(self, telem: "Telemetry", interval_s: float = 5.0):
+        self._telem = telem
+        self._interval_s = max(0.5, float(interval_s))
+        self._lock = threading.Lock()
+        self._stop_evt = threading.Event()
+        self._state: Dict[str, Union[str, float, Dict]] = {
+            "stage": "init",
+            "substage": "",
+            "progress_pct": 0.0,
+            "message": "initialized",
+            "eta": "unknown",
+            "level": "info",
+            "metrics": {},
+        }
+        self._last_emit_ts = 0.0
+        self._last_sig = ("", "")
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _emit_locked(self) -> None:
+        ev = {
+            "ts": _now(),
+            "stage": self._state.get("stage"),
+            "substage": self._state.get("substage"),
+            "progress_pct": float(self._state.get("progress_pct") or 0.0),
+            "message": self._state.get("message"),
+            "eta": self._state.get("eta") or "unknown",
+            "metrics": self._state.get("metrics") or {},
+            "level": self._state.get("level") or "info",
+        }
+        try:
+            line = json.dumps(ev, ensure_ascii=False)
+        except Exception:
+            # Fallback to minimal safe payload if serialization fails
+            safe_ev = {
+                "ts": ev.get("ts"),
+                "stage": ev.get("stage"),
+                "progress_pct": ev.get("progress_pct"),
+                "message": "status",
+                "level": ev.get("level"),
+            }
+            line = json.dumps(safe_ev, ensure_ascii=False)
+        try:
+            sys.stdout.write(line + "\n")
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            self._telem.write_event(ev)
+        except Exception:
+            pass
+        self._last_emit_ts = time.time()
+
+    def update(
+        self,
+        *,
+        stage: Optional[str] = None,
+        substage: Optional[str] = None,
+        progress_pct: Optional[float] = None,
+        message: Optional[str] = None,
+        eta: Optional[str] = None,
+        metrics: Optional[Dict] = None,
+        level: Optional[str] = None,
+        force: bool = False,
+    ) -> None:
+        with self._lock:
+            if stage is not None:
+                self._state["stage"] = stage
+            if substage is not None:
+                self._state["substage"] = substage
+            if progress_pct is not None:
+                try:
+                    pct = max(0.0, min(100.0, float(progress_pct)))
+                except Exception:
+                    pct = 0.0
+                self._state["progress_pct"] = pct
+            if message is not None:
+                self._state["message"] = message
+            if eta is not None:
+                self._state["eta"] = eta
+            if metrics is not None:
+                self._state["metrics"] = metrics
+            if level is not None:
+                self._state["level"] = level
+            sig = (str(self._state.get("stage") or ""), str(self._state.get("substage") or ""))
+            should_emit = force or (sig != self._last_sig)
+            if should_emit:
+                self._last_sig = sig
+                self._emit_locked()
+
+    def _run(self) -> None:
+        while not self._stop_evt.is_set():
+            now = time.time()
+            with self._lock:
+                if now - self._last_emit_ts >= self._interval_s:
+                    self._emit_locked()
+            self._stop_evt.wait(self._interval_s / 2.0)
+
+    def stop(self, final_summary: Optional[Dict] = None) -> None:
+        try:
+            if final_summary is not None:
+                with self._lock:
+                    self._state["stage"] = "summary"
+                    self._state["substage"] = ""
+                    self._state["progress_pct"] = 100.0
+                    self._state["message"] = "pipeline completed" if (final_summary.get("exit_code", 0) == 0) else "pipeline failed"
+                    self._state["eta"] = "now"
+                    self._state["metrics"] = final_summary
+                    self._state["level"] = "info" if (final_summary.get("exit_code", 0) == 0) else "error"
+                    self._emit_locked()
+        except Exception:
+            pass
+        self._stop_evt.set()
+        try:
+            self._thread.join(timeout=1.0)
+        except Exception:
+            pass
+
+
 class Telemetry:
     def __init__(self, logs_dir: str):
         os.makedirs(logs_dir, exist_ok=True)
@@ -80,7 +204,7 @@ def ensure_env_defaults() -> None:
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "true")
 
 
-def preflight(telem: Telemetry, skip_bootstrap: bool) -> None:
+def preflight(telem: Telemetry, skip_bootstrap: bool, status: Optional[StatusEmitter] = None) -> None:
     telem.write_text(f"[{_now()}] Preflight checks starting")
     # torch & cuda
     torch_ok = False
@@ -125,6 +249,7 @@ def preflight(telem: Telemetry, skip_bootstrap: bool) -> None:
             retries=0,
             telem=telem,
             extra_env=env,
+            status=status,
         )
 def _pid_is_running(pid: int) -> bool:
     try:
@@ -169,6 +294,7 @@ def run_step(
     retries: int,
     telem: Telemetry,
     extra_env: Optional[Dict[str, str]] = None,
+    status: Optional[StatusEmitter] = None,
 ) -> Tuple[int, float]:
     started_at = time.time()
     env = dict(os.environ)
@@ -181,6 +307,11 @@ def run_step(
     lines_tail: deque[str] = deque(maxlen=200)
     while True:
         attempt += 1
+        if status is not None:
+            try:
+                status.update(stage=name, substage=f"attempt {attempt}", progress_pct=0.0, message="starting", eta="unknown", level="info", force=True)
+            except Exception:
+                pass
         telem.write_event({
             "ts": _now(), "step": name, "attempt": attempt, "status": "starting", "cmd": cmd,
         })
@@ -231,11 +362,11 @@ def run_step(
                 if not drained_any:
                     try:
                         # If nothing was immediately available, block briefly for next line
-                    line = q.get(timeout=0.25)
-                    telem.write_text(line)
+                        line = q.get(timeout=0.25)
+                        telem.write_text(line)
                         lines_tail.append(line)
-                except queue.Empty:
-                    pass
+                    except queue.Empty:
+                        pass
                 if end_by and time.time() > end_by:
                     raise TimeoutError(f"step '{name}' timed out after {timeout_s}s")
                 # Improved completion detection: wait for process exit and pump thread to finish,
@@ -257,6 +388,11 @@ def run_step(
         except TimeoutError as e:
             duration = time.time() - started_at
             telem.write_text(f"[{_now()}] [timeout] {name}: {e}")
+            if status is not None:
+                try:
+                    status.update(stage=name, progress_pct=0.0, message=f"timeout after {timeout_s}s", level="error", force=True)
+                except Exception:
+                    pass
             # terminate process tree
             try:
                 proc.terminate()
@@ -270,6 +406,11 @@ def run_step(
         except Exception as e:
             duration = time.time() - started_at
             telem.write_text(f"[{_now()}] [error] {name}: {e}")
+            if status is not None:
+                try:
+                    status.update(stage=name, progress_pct=0.0, message=f"error: {e}", level="error", force=True)
+                except Exception:
+                    pass
             code = 1
 
         last_code = int(code)
@@ -277,6 +418,13 @@ def run_step(
             "ts": _now(), "step": name, "attempt": attempt,
             "status": "finished", "code": last_code, "duration_s": round(duration, 3),
         })
+        # Warn detection
+        try:
+            lower_tail = "\n".join(lines_tail).lower()
+            if status is not None and ("[warn]" in lower_tail or "warning:" in lower_tail):
+                status.update(stage=name, message="warnings observed in logs", level="warn", force=True)
+        except Exception:
+            pass
         if last_code != 0:
             try:
                 tail_lines = list(lines_tail)[-80:]
@@ -286,6 +434,11 @@ def run_step(
                 telem.write_text(f"[{_now()}] [tail:{name}] --- end ---")
             except Exception:
                 pass
+            if status is not None:
+                try:
+                    status.update(stage=name, progress_pct=0.0, message=f"failed (code {last_code})", level="error", force=True)
+                except Exception:
+                    pass
 
         # Classify errors to avoid unnecessary retries on fatal conditions
         # Retryable: common transient network/HF issues; Fatal: missing deps, not found, OOM, etc.
@@ -306,13 +459,33 @@ def run_step(
         is_fatal = any(m in lower_tail for m in fatal_markers)
 
         if last_code == 0:
+            if status is not None:
+                try:
+                    status.update(stage=name, progress_pct=100.0, message="completed", level="info", force=True)
+                except Exception:
+                    pass
             return last_code, duration
         if attempt > retries:
+            if status is not None:
+                try:
+                    status.update(stage=name, progress_pct=0.0, message="exhausted retries", level="error", force=True)
+                except Exception:
+                    pass
             return last_code, duration
         if is_fatal:
             telem.write_text(f"[{_now()}] [fatal] '{name}' appears non-retryable; not retrying")
+            if status is not None:
+                try:
+                    status.update(stage=name, progress_pct=0.0, message="non-retryable failure", level="error", force=True)
+                except Exception:
+                    pass
             return last_code, duration
         # backoff
+        if status is not None:
+            try:
+                status.update(stage=name, message="retrying after failure", level="warn", force=True)
+            except Exception:
+                pass
         time.sleep(min(60, 5 * attempt))
 
 
@@ -336,11 +509,13 @@ def _sum_bytes(path: str) -> int:
     return total
 
 
-def _monitor_corpus(corpus_cfg: str, telem: Telemetry, stop_evt: threading.Event) -> None:
+def _monitor_corpus(corpus_cfg: str, telem: Telemetry, stop_evt: threading.Event, status: Optional[StatusEmitter] = None) -> None:
     cfg = _read_yaml(corpus_cfg)
     out_dir = cfg.get("output_dir") or os.path.join(_pkg_root(), "data", "biomed_corpus")
     target = int(cfg.get("target_total_bytes", 0))
     last_line = ""
+    last_bytes = 0
+    last_ts = time.time()
     while not stop_evt.is_set():
         try:
             b = _sum_bytes(out_dir) if os.path.isdir(out_dir) else 0
@@ -350,9 +525,32 @@ def _monitor_corpus(corpus_cfg: str, telem: Telemetry, stop_evt: threading.Event
                 telem.write_text(f"[{_now()}] {line}")
                 telem.write_event({"ts": _now(), "progress": "corpus", "bytes": b, "target": target})
                 last_line = line
+            if status is not None:
+                now_ts = time.time()
+                dt_s = max(1e-3, now_ts - last_ts)
+                rate = max(0.0, (b - last_bytes) / dt_s)
+                remaining = max(0, target - b) if target > 0 else 0
+                eta_ts = None
+                if target > 0 and rate > 0:
+                    eta_ts = dt.datetime.utcnow() + dt.timedelta(seconds=remaining / rate)
+                status.update(
+                    stage="build-corpus",
+                    substage="aggregating",
+                    progress_pct=pct if target > 0 else 0.0,
+                    message="corpus building",
+                    eta=eta_ts.strftime("%Y-%m-%dT%H:%M:%SZ") if eta_ts else "unknown",
+                    metrics={
+                        "bytes": b,
+                        "target_bytes": target,
+                        "rate_bps": int(rate),
+                        "est_remaining_s": int(remaining / rate) if (target > 0 and rate > 0) else None,
+                    },
+                )
+                last_bytes = b
+                last_ts = now_ts
         except Exception:
             pass
-        stop_evt.wait(15.0)
+        stop_evt.wait(5.0)
 
 
 def main() -> None:
@@ -373,20 +571,30 @@ def main() -> None:
     ensure_env_defaults()
     logs_dir = os.path.join(_pkg_root(), "runs", "logs")
     telem = Telemetry(logs_dir=logs_dir)
+    status = StatusEmitter(telem, interval_s=5.0)
     summary: Dict[str, Dict] = {"started_at": _now(), "steps": {}}
     lock_path: Optional[str] = None
     try:
         # preflight + optional bootstrap
-        preflight(telem, skip_bootstrap=bool(args.skip_bootstrap))
+        status.update(stage="preflight", progress_pct=0.0, message="starting", level="info", force=True)
+        preflight(telem, skip_bootstrap=bool(args.skip_bootstrap), status=status)
+        status.update(stage="preflight", progress_pct=100.0, message="completed", level="info", force=True)
 
         # single-run lock
+        status.update(stage="acquire-lock", progress_pct=0.0, message="acquiring", level="info", force=True)
         lock_path = _acquire_lock(telem)
         if lock_path is None:
             telem.write_text(f"[{_now()}] Could not acquire pipeline lock; exiting")
             telem.write_summary({"locked": True, "finished_at": _now(), "exit_code": 1})
+            try:
+                status.update(stage="acquire-lock", progress_pct=0.0, message="lock busy", level="error", force=True)
+            except Exception:
+                pass
             sys.exit(1)
+        status.update(stage="acquire-lock", progress_pct=100.0, message="acquired", level="info", force=True)
 
         # Step 1: prepare-data
+        status.update(stage="prepare-data", progress_pct=0.0, message="starting", level="info", force=True)
         code, dur = run_step(
             name="prepare-data",
             # Use CLI directly via Python to avoid relying on removed script
@@ -394,14 +602,17 @@ def main() -> None:
             timeout_s=max(30 * 60, args.step_timeout // 8),
             retries=args.max_retries,
             telem=telem,
+            status=status,
         )
         if code != 0:
             raise SystemExit(code)
         summary["steps"]["prepare-data"] = {"code": code, "duration_s": round(dur, 2)}
+        status.update(stage="prepare-data", progress_pct=100.0, message="completed", level="info", force=True)
 
         # Step 2: build-corpus with progress monitor
+        status.update(stage="build-corpus", progress_pct=0.0, message="starting", level="info", force=True)
         stop_evt = threading.Event()
-        mon = threading.Thread(target=_monitor_corpus, args=(args.corpus_config, telem, stop_evt), daemon=True)
+        mon = threading.Thread(target=_monitor_corpus, args=(args.corpus_config, telem, stop_evt, status), daemon=True)
         mon.start()
         try:
             env = {
@@ -418,6 +629,7 @@ def main() -> None:
                 retries=args.max_retries,
                 telem=telem,
                 extra_env=env,
+                status=status,
             )
         finally:
             stop_evt.set()
@@ -441,6 +653,10 @@ def main() -> None:
                 telem.write_text(
                     f"[{_now()}] [error] corpus too small: {total} bytes < minimum {min_required} bytes"
                 )
+                try:
+                    status.update(stage="build-corpus", progress_pct=0.0, message="corpus too small", level="error", force=True)
+                except Exception:
+                    pass
                 raise SystemExit(3)
             if target > 0 and total < target:
                 telem.write_text(f"[{_now()}] [warn] corpus under target: {total} < {target} bytes")
@@ -449,8 +665,10 @@ def main() -> None:
         except Exception:
             pass
         summary["steps"]["build-corpus"] = {"code": code, "duration_s": round(dur, 2)}
+        status.update(stage="build-corpus", progress_pct=100.0, message="completed", level="info", force=True)
 
         # Step 3: adapt (TokAlign-style)
+        status.update(stage="adapt", progress_pct=0.0, message="starting", level="info", force=True)
         code, dur = run_step(
             name="adapt",
             cmd=[
@@ -463,12 +681,15 @@ def main() -> None:
             timeout_s=max(2 * 60 * 60, args.step_timeout // 2),
             retries=args.max_retries,
             telem=telem,
+            status=status,
         )
         if code != 0:
             raise SystemExit(code)
         summary["steps"]["adapt"] = {"code": code, "duration_s": round(dur, 2)}
+        status.update(stage="adapt", progress_pct=100.0, message="completed", level="info", force=True)
 
         # Step 4: eval
+        status.update(stage="eval", progress_pct=0.0, message="starting", level="info", force=True)
         code, dur = run_step(
             name="eval",
             cmd=[
@@ -478,26 +699,40 @@ def main() -> None:
             timeout_s=max(2 * 60 * 60, args.step_timeout // 2),
             retries=args.max_retries,
             telem=telem,
+            status=status,
         )
         if code != 0:
             raise SystemExit(code)
         summary["steps"]["eval"] = {"code": code, "duration_s": round(dur, 2)}
+        status.update(stage="eval", progress_pct=100.0, message="completed", level="info", force=True)
 
         summary["finished_at"] = _now()
         telem.write_text(f"[{_now()}] Pipeline completed successfully")
         telem.write_summary(summary)
+        try:
+            status.stop(final_summary={**summary, "exit_code": 0})
+        except Exception:
+            pass
         sys.exit(0)
     except SystemExit as e:
         summary["finished_at"] = _now()
         summary["exit_code"] = int(e.code) if isinstance(e.code, int) else 1
         telem.write_text(f"[{_now()}] Pipeline failed with exit code {summary['exit_code']}")
         telem.write_summary(summary)
+        try:
+            status.stop(final_summary=summary)
+        except Exception:
+            pass
         sys.exit(summary["exit_code"])  # rethrow
     except Exception as e:
         summary["finished_at"] = _now()
         summary["exit_code"] = 1
         telem.write_text(f"[{_now()}] Pipeline error: {e}")
         telem.write_summary(summary)
+        try:
+            status.stop(final_summary=summary)
+        except Exception:
+            pass
         sys.exit(1)
     finally:
         telem.close()
