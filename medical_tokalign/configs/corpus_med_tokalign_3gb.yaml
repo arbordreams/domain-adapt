@@ -46,7 +46,7 @@ sources:
     max_chars: 20000
 
   meddialog:
-    enabled: true
+    enabled: false  # Disabled due to UTF-8 decoding issues
     type: hf
     dataset: bigbio/meddialog
     name: null
