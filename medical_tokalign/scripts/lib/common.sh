@@ -113,7 +113,6 @@ ensure_env() {
 import importlib.util, sys
 sys.exit(0 if importlib.util.find_spec("hf_transfer") is not None else 1)
 PY
-    then
       info "hf_transfer available; fast transfer enabled"
     else
       warn "hf_transfer not installed; fast transfer may be disabled by runtime"
