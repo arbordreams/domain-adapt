@@ -814,9 +814,19 @@ def train_glove_vectors(
     co_shuf_file = os.path.join(glove_dir, f"cooccurrence.shuf.{base}.bin")
     save_file = os.path.join(glove_dir, base)
 
-    # Auto-adjust min_count for tiny corpora to avoid empty/small vocabularies
+    # Pre-size parameters for first-try stability based on corpus size
     try:
         file_bytes = os.path.getsize(corpus_path)
+        # Large corpora: proactively shrink window and raise min_count to bound cooccur size
+        if file_bytes >= 4 * 1024 * 1024 * 1024:  # >= 4 GB
+            window_size = min(int(window_size), 5)
+            vocab_min_count = max(int(vocab_min_count), 30)
+        elif file_bytes >= 2 * 1024 * 1024 * 1024:  # >= 2 GB
+            window_size = min(int(window_size), 8)
+            vocab_min_count = max(int(vocab_min_count), 20)
+        elif file_bytes >= 1 * 1024 * 1024 * 1024:  # >= 1 GB
+            window_size = min(int(window_size), 10)
+            vocab_min_count = max(int(vocab_min_count), 10)
         # If corpus is very small, relax min_count aggressively
         if file_bytes < 10 * 1024 * 1024:  # < 10 MB
             vocab_min_count = min(vocab_min_count, 1)

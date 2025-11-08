@@ -107,20 +107,20 @@ def preflight(telem: Telemetry, skip_bootstrap: bool) -> None:
     except Exception as e:
         telem.write_text(f"[warn] hf_transfer import failed: {e}")
 
-    # GloVe binaries
-    glove_dir = os.path.join(_pkg_root(), "tools", "GloVe", "build")
-    need_glove = not all(os.path.isfile(os.path.join(glove_dir, b)) for b in ("glove", "vocab_count", "cooccur", "shuffle"))
-    if need_glove:
-        telem.write_text("[info] GloVe binaries not present")
-
-    if (not flash_ok or need_glove) and not skip_bootstrap:
-        telem.write_text("[info] Running bootstrap to satisfy prerequisites")
-        # Use PIP_BREAK_SYSTEM_PACKAGES=1 to bypass PEP668
+    # Prefer pinned dependency bootstrap for a consistent first run
+    if not skip_bootstrap:
+        telem.write_text("[info] Bootstrapping Python environment with pinned requirements")
         env = dict(os.environ)
         env["PIP_BREAK_SYSTEM_PACKAGES"] = "1"
+        gpu_flag: list[str] = []
+        try:
+            if _which("nvidia-smi"):
+                gpu_flag = ["--gpu-cu12"]
+        except Exception:
+            gpu_flag = []
         run_step(
             name="bootstrap",
-            cmd=["/bin/bash", os.path.join(_pkg_root(), "scripts", "bootstrap_runpod.sh")],
+            cmd=["/bin/bash", os.path.join(_pkg_root(), "scripts", "bootstrap_env.sh"), *gpu_flag],
             timeout_s=60 * 60,
             retries=0,
             telem=telem,
