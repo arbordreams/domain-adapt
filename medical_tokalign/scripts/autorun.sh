@@ -85,6 +85,10 @@ NPROC="$ALLOCATED_VCPUS"
 if [[ "$GLOVE_MEMORY_MB" -lt 4096 ]]; then GLOVE_MEMORY_MB=4096; fi
 if [[ "$GLOVE_MEMORY_MB" -gt 65536 ]]; then GLOVE_MEMORY_MB=65536; fi
 
+# TokAlign-faithful cap for per-run GloVe corpora (combined src+tgt bytes).
+# Default ~1 GiB total; override via GLOVE_CORPUS_MAX_BYTES if desired.
+: "${GLOVE_CORPUS_MAX_BYTES:=1000000000}"
+
 # Shuffle memory: conservative 8 GB, allow env override
 : "${GLOVE_SHUFFLE_MEMORY_MB:=8192}"
 
@@ -94,8 +98,8 @@ if [[ "$GLOVE_THREADS" -lt 1 ]]; then GLOVE_THREADS=1; fi
 # Cap at 64 threads to avoid excessive context switching
 if [[ "$GLOVE_THREADS" -gt 64 ]]; then GLOVE_THREADS=64; fi
 
-export GLOVE_MEMORY_MB GLOVE_THREADS GLOVE_SHUFFLE_MEMORY_MB
-echo "[autorun] RAM_MB=$RAM_MB ALLOCATED_VCPUS=$NPROC GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_SHUFFLE_MEMORY_MB=$GLOVE_SHUFFLE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS"
+export GLOVE_MEMORY_MB GLOVE_THREADS GLOVE_SHUFFLE_MEMORY_MB GLOVE_CORPUS_MAX_BYTES
+echo "[autorun] RAM_MB=$RAM_MB ALLOCATED_VCPUS=$NPROC GLOVE_MEMORY_MB=$GLOVE_MEMORY_MB GLOVE_SHUFFLE_MEMORY_MB=$GLOVE_SHUFFLE_MEMORY_MB GLOVE_THREADS=$GLOVE_THREADS GLOVE_CORPUS_MAX_BYTES=$GLOVE_CORPUS_MAX_BYTES"
 
 # Alignment BLAS threading (modest speedup, safe defaults)
 # Derive ALIGN_THREADS ~= allocated_vCPUs/2, clamped [4,16], overridable via env

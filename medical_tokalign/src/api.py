@@ -64,6 +64,18 @@ def build_glove_corpora(
     tok_src = AutoTokenizer.from_pretrained(model_id, use_fast=True)
     tok_tgt = AutoTokenizer.from_pretrained(tok_dir, use_fast=True)
 
+    # Optional TokAlign-faithful size cap for GloVe corpora (combined cap across src+tgt)
+    # Set via env GLOVE_CORPUS_MAX_BYTES (e.g., 1073741824 for ~1 GiB total)
+    _cap_total_bytes: Optional[int] = None
+    try:
+        _env_cap = os.environ.get("GLOVE_CORPUS_MAX_BYTES")
+        if _env_cap:
+            _cap_total_bytes = int(str(_env_cap).strip())
+            if _cap_total_bytes <= 0:
+                _cap_total_bytes = None
+    except Exception:
+        _cap_total_bytes = None
+
     def load_jsonl(path: str):
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -109,6 +121,14 @@ def build_glove_corpora(
         count = 0
         num_src = 0
         num_tgt = 0
+        written_src = 0
+        written_tgt = 0
+        src_budget: Optional[int] = None
+        tgt_budget: Optional[int] = None
+        if _cap_total_bytes is not None:
+            half = max(1, int(_cap_total_bytes // 2))
+            src_budget = half
+            tgt_budget = half
         sample_src: List[int] = []
         sample_tgt: List[int] = []
         sample_cap = 10000
@@ -117,17 +137,27 @@ def build_glove_corpora(
                 ids_s = tok_src(t, add_special_tokens=False, truncation=True, max_length=max_model_len)["input_ids"]
                 ids_t = tok_tgt(t, add_special_tokens=False, truncation=True, max_length=max_model_len)["input_ids"]
                 if len(ids_s) >= 15:
-                    fs.write(" ".join(map(str, ids_s)) + "\n")
-                    num_src += 1
-                    if len(sample_src) < sample_cap:
-                        sample_src.append(len(ids_s))
+                    if src_budget is None or written_src < src_budget:
+                        _line_s = " ".join(map(str, ids_s)) + "\n"
+                        fs.write(_line_s)
+                        written_src += len(_line_s.encode("utf-8"))
+                        num_src += 1
+                        if len(sample_src) < sample_cap:
+                            sample_src.append(len(ids_s))
                 if len(ids_t) >= 15:
-                    ft.write(" ".join(map(str, ids_t)) + "\n")
-                    num_tgt += 1
-                    if len(sample_tgt) < sample_cap:
-                        sample_tgt.append(len(ids_t))
+                    if tgt_budget is None or written_tgt < tgt_budget:
+                        _line_t = " ".join(map(str, ids_t)) + "\n"
+                        ft.write(_line_t)
+                        written_tgt += len(_line_t.encode("utf-8"))
+                        num_tgt += 1
+                        if len(sample_tgt) < sample_cap:
+                            sample_tgt.append(len(ids_t))
                 if len(ids_s) >= 15 or len(ids_t) >= 15:
                     count += 1
+                # Stop early once both budgets are exhausted
+                if src_budget is not None and tgt_budget is not None:
+                    if written_src >= src_budget and written_tgt >= tgt_budget:
+                        break
 
         def _stats(n: int, sample: List[int]) -> Dict[str, float]:
             if not sample:
