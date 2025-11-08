@@ -1,0 +1,265 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{float}
+
+\title{Append, Align, Reuse: Efficient Medical Vocabulary Adaptation via Deterministic Token Mapping}
+\author{Sebastien Kawada, Aryan Ahuja, Anannya Saxena, \\ Aniroodhan Rengaa, Eric Xia}
+\date{November 2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+Large language models (LLMs) often struggle to represent specialized domains efficiently because their tokenizers are optimized for general-purpose text. 
+When applied to fields such as medicine, law, or materials science, they tend to over-fragment important terminology. 
+For example, ``electrocardiogram'' might be split into multiple subwords like [``elect'', ``ro'', ``card'', ``io'', ``gram''], disrupting semantic coherence and making domain retrieval less efficient. 
+This fragmentation inflates sequence lengths, weakens semantic recall, and increases computational cost.
+
+TokAlign~\cite{li2025tokalign} demonstrated that cross-lingual vocabulary compression can preserve translation quality while reducing token count by nearly 30\%. 
+However, its potential for domain adaptation remains largely unexplored. 
+We propose to adapt TokAlign’s methodology to align domain-specific tokenizations with general-purpose vocabularies, preserving compatibility while improving in-domain efficiency. 
+Rather than modifying the model or applying runtime mappings, our method performs a static \emph{alignment-based tokenizer adaptation}, producing a new tokenizer whose merge rules and embeddings are derived from the alignment process itself. 
+This approach leverages TokAlign's strengths (probabilistic mapping and cross-embedding similarity) while tailoring them to domain token frequency and structure.
+
+\section{Current Limitations and Relevant Papers}
+
+Prior tokenizer adaptation approaches have attempted to improve domain efficiency but fall short in generality or maintainability.
+\section{Related Work}
+
+A number of recent papers have explored tokenizer adaptation for multilingual and domain-specific efficiency. 
+Table~\ref{tab:related} summarizes these works, their key contributions, and the remaining gaps our proposed TokAlign-based approach aims to address.
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{p{3.1cm} p{6.4cm} p{6.4cm}}
+\hline
+\textbf{Paper} & \textbf{Summary} & \textbf{Gap / Possible Extension} \\ \hline
+\textbf{TokAlign}~\cite{li2025tokalign} &
+Replaces vocabulary for language-specific domains through token alignment without increasing vocabulary size. Demonstrates efficiency and semantic preservation across languages. &
+Evaluated only in cross-lingual translation settings, not domain-specific adaptation tasks. We propose to extend the TokAlign alignment methodology for specialized domains such as biomedical or legal text. \\
+
+\textbf{AdaptiVocab}~\cite{nakash2025adaptivocab} &
+Introduces a lightweight, supervised technique to append tokens to an existing vocabulary while preserving model weights. Identifies high-frequency n-grams and inserts corresponding tokens based on an efficiency score. &
+Highly supervised and limited to token-patching. Could benefit from unsupervised alignment-based mappings like TokAlign, avoiding vocabulary growth and maintaining semantic continuity. \\
+
+\textbf{Universal Tokenizer}~\cite{onetokenizer} &
+Aims to design a universal tokenizer for all languages, improving cross-lingual robustness and consistency across scripts. &
+Optimized for general multilingual coverage rather than specific domain specialization. Our focus instead is efficient, domain-oriented adaptation. \\
+
+\textbf{MedVoc}~\cite{balde2024medvoc} &
+Adapts tokenizers for medical summarization using QuickUMLS-based supervision. Adds medical terms as new tokens, expanding embeddings. &
+Supervision-heavy and append-only, increasing vocabulary size and breaking backward compatibility. We extend TokAlign to minimize vocabulary overhead while retaining model compatibility. \\
+
+\textbf{UNKs Everywhere}~\cite{unkseverywhere2024} &
+Shows that multilingual models face “UNK” token collapse when encountering unseen scripts. Words fragment or merge, degrading representation fidelity and model calibration. &
+Highlights the importance of maintaining token-level fidelity. Alignment-based domain adaptation can similarly prevent fragmentation in domain-specific sublanguages. \\
+
+\textbf{Uncased Tokenization for Clinical Notes}~\cite{uncasedtoken} &
+Addresses the difficulty of processing unstructured clinical notes by encoding case information separately, allowing improved model generalization without adding new tokens. &
+Fails when capitalization is semantically significant (e.g., “May” vs. “may”). TokAlign’s domain mapping can treat such variants as aligned rather than fragmented, preserving contextual meaning. \\
+\end{tabular}
+\caption{Summary of relevant past work on vocabulary and tokenizer adaptation, and potential extensions using TokAlign methodology for domain-specific adaptation.}
+\label{tab:related}
+\end{table}
+
+\begin{table}[H]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{p{3.1cm} p{6.4cm} p{6.4cm}}
+\textbf{Vocabulary Customization for Efficient Domain-Specific LLM Deployment}~\cite{herold2025vocabcustomization} &
+Ensures segmentation never increases sequence length, shortening inputs by 20\% in e-commerce tasks. &
+Domain-specific only; cannot align or transfer between domains. TokAlign could align two token systems (e.g., medical to general text) for more flexible adaptation. \\
+
+\textbf{VocADT}~\cite{han2024vocadt} &
+Introduces an adapter-based embedding module for integrating new vocabularies and reducing fragmentation across scripts. &
+Relies on sufficient monolingual LM training and does not enforce explicit token-level alignments. Our approach aims to retain TokAlign’s semantic alignment objective for sparse, low-resource domains. \\
+
+\textbf{XLM-V}~\cite{liang2023xlmv} &
+Expands vocabulary coverage in multilingual LMs to address fairness and representation imbalance across languages. &
+Improves coverage but not tokenization disparity (“tokenization tax”). Does not structurally align vocabularies, leaving room for alignment-based compression methods. \\
+
+\textbf{Adaptive BPE Tokenization}~\cite{balde2024adaptivebpe} &
+Modifies BPE tokenization initialization to prioritize newly added domain-specific terms, improving coverage during fine-tuning. &
+Leaves new embeddings semantically disconnected from pretrained tokens. An alignment-based mapping would enable one-to-one token correspondence and efficient reuse of prior embeddings. \\
+
+\hline
+\end{tabular}
+\caption{Summary of relevant past work on vocabulary and tokenizer adaptation, and potential extensions using TokAlign methodology for domain-specific adaptation.}
+\label{tab:related}
+\end{table}
+
+Common weaknesses across these methods include:
+(1) over-fragmentation of specialized terms, 
+(2) lack of compatibility with pretrained model vocabularies, and 
+(3) reliance on costly retraining procedures.  
+Our proposed adaptation of TokAlign directly addresses these challenges by learning a mapping between the base and domain vocabularies and using it to rebuild token merge rules and embeddings offline.
+
+\section{Methods}
+
+We adapt TokAlign’s probabilistic token alignment framework for domain specialization. 
+The key idea is to train an alignment matrix between a general-purpose tokenizer and a domain tokenizer, using co-occurrence-based embeddings to identify near-equivalent token pairs. 
+This matrix is then used to construct a domain-adapted tokenizer and initialize its embedding space through weighted averaging from the base embeddings.
+
+\subsection*{Overview}
+
+\begin{enumerate}
+    \item \textbf{Train Domain Tokenizer:} Train a domain-specific BPE tokenizer (e.g., on medical abstracts).
+    \item \textbf{Learn Alignment:} Compute embedding-based similarities between domain and base tokens using GloVe-style co-occurrence embeddings.
+    \item \textbf{Derive Alignment Matrix:} Optimize a sparse stochastic matrix $A \in \mathbb{R}^{|V_d| \times |V_b|}$ mapping domain to base tokens.
+    \item \textbf{Rebuild Tokenizer:} Adjust merge rules to preserve the semantic proximity implied by $A$, effectively fusing domain granularity with base consistency.
+    \item \textbf{Initialize Embeddings:} For each domain token $t_d$, initialize its embedding as a weighted combination of its aligned base tokens’ embeddings.
+\end{enumerate}
+
+This process yields a new tokenizer and embedding table compatible with the base model’s architecture but tuned for the target domain. 
+Unlike runtime routing, the result is static and can be directly deployed with the pretrained model after re-tokenization.
+
+\section{Experimental Setup}
+
+We replicate and extend TokAlign’s cross-lingual setup to test domain transfer. 
+Experiments will be conducted using open-weight models such as Pythia and RoBERTa, with corpora drawn from M2D2~\cite{machelreid2023m2d2}, BioASQ~\cite{tsatsaronis2015bioasq}, and EBM~\cite{molla2011ebm}. 
+
+\subsection*{Evaluation Pipeline}
+
+\begin{enumerate}
+    \item Collect in-domain data (e.g., PubMed, UMLS) and general text.
+    \item Train base and domain tokenizers independently.
+    \item Learn cross-token alignments using GloVe co-occurrence embeddings.
+    \item Apply alignment to rebuild the adapted tokenizer and embedding table.
+    \item Evaluate token efficiency (tokens per byte, per sentence).
+    \item Measure downstream QA and retrieval metrics using RAG and FiD baselines.
+\end{enumerate}
+
+Performance will be compared against (a) base tokenizer, (b) domain tokenizer without alignment, and (c) AdaptiVocab with manual merges.
+
+\section{Ideal Results}
+
+We anticipate:
+\begin{itemize}
+    \item 10--20\% token count reduction for domain text at parity in quality.
+    \item Stable or improved downstream QA and summarization accuracy.
+    \item High embedding cosine similarity with base tokens, preserving model coherence.
+    \item Full architectural compatibility; no retraining required.
+\end{itemize}
+
+These results would demonstrate that TokAlign’s alignment process can generalize beyond cross-lingual compression to efficient domain adaptation. Under the circumstances which domain-specific adaptation do not result in reasonable improved tokenization patterns, we will analyze the structure of the alignment matrices obtained to determine better the constraints of domain-specific adaptation. We will then proceed to test other datasets, e.g. smaller and more specialized datasets.
+
+\section{Potential Limitations}
+
+\begin{itemize}
+    \item \textbf{Alignment sparsity:} Soft mappings may overfit high-frequency tokens, leading to imbalanced embedding updates.
+    \item \textbf{Ambiguity in polysemy:} Tokens that overlap across domains (e.g., “lead” in chemistry vs. language) may be misaligned.
+    \item \textbf{Evaluation metrics:} Standard BLEU or chrF may not reflect improvements in token efficiency or retrieval accuracy.
+    \item \textbf{Dataset bias:} Training alignments on one subdomain (e.g., biomedical abstracts) may not generalize to others (e.g., clinical notes). In order to mitigate this issue, we plan to rigorously evaluate on out-of-domain datasets such as clinical notes and publicly available anonymized health information.
+    
+    \item \textbf{Vocabulary rigidity:} Because the method keeps vocabulary size constant, it may lack the ability to accurately entirely new domain concepts which are not in some sense composable from existing tokens.
+\end{itemize}
+
+\vspace{-1em}
+\begin{thebibliography}{9}
+
+\bibitem{han2024vocadt}
+H.~Han, A.~Eriguchi, H.~Xu, H.~Hoang, M.~Carpuat, and H.~Khayrallah,
+\textit{Adapters for Altering LLM Vocabularies: What Languages Benefit the Most?}
+arXiv preprint arXiv:2410.09644, 2024.
+\url{https://arxiv.org/abs/2410.09644}.
+
+\bibitem{liang2023xlmv}
+D.~Liang, H.~Gonen, Y.~Mao, R.~Hou, N.~Goyal, M.~Ghazvininejad, L.~Zettlemoyer, and M.~Khabsa,
+\textit{XLM-V: Overcoming the Vocabulary Bottleneck in Multilingual Masked Language Models}.
+arXiv preprint arXiv:2301.10472, 2023.
+\url{https://arxiv.org/abs/2301.10472}.
+
+\bibitem{tsatsaronis2015bioasq}
+G.~Tsatsaronis et al.,
+\textit{An Overview of the BIOASQ Large-Scale Biomedical Semantic Indexing and Question Answering Competition}.
+BMC Bioinformatics, vol.~16, article~138, 2015.
+\url{https://doi.org/10.1186/s12859-015-0564-6}.
+
+\bibitem{machelreid2023m2d2}
+M.~Reid, V.~Zhong, S.~Gururangan, and L.~Zettlemoyer,
+\textit{M2D2: A Massively Multi-Domain Language Modeling Dataset}.
+In \textit{Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing},
+Abu Dhabi, United Arab Emirates, December 2022, pp.~964--975.
+Association for Computational Linguistics.
+\url{https://aclanthology.org/2022.emnlp-main.63/}.
+
+\bibitem{molla2011ebm}
+B.~Nye, J.~J.~Li, R.~Patel, Y.~Yang, I.~Marshall, A.~Nenkova, and B.~Wallace,
+\textit{A Corpus with Multi-Level Annotations of Patients, Interventions and Outcomes to Support Language Processing for Medical Literature}.
+In \textit{Proceedings of the 56th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
+Melbourne, Australia, July 2018, pp.~197--207.
+Association for Computational Linguistics.
+\url{https://aclanthology.org/P18-1019/}.
+
+\bibitem{cuturi2013sinkhorn}
+M.~Cuturi,
+\textit{Sinkhorn Distances: Lightspeed Computation of Optimal Transport}.
+In \textit{Advances in Neural Information Processing Systems 26 (NIPS 2013)}, 2013, pp.~2292--2300.
+\url{https://proceedings.neurips.cc/paper/2013/hash/af21d0c97db2e27e13572cbf59eb343d-Abstract.html}.
+
+\bibitem{li2025tokalign}
+C.~Li, J.~Zhang, and C.~Zong, 
+\textit{TokAlign: Efficient Vocabulary Adaptation via Token Alignment}. 
+In \textit{Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)}, 
+Vienna, Austria, 2025, pp.~4109--4126. 
+\url{https://aclanthology.org/2025.acl-long.207/}.
+
+\bibitem{nakash2025adaptivocab}
+I.~Nakash, N.~Calderon, E.~Ben David, E.~Hoffer, and R.~Reichart, 
+\textit{AdaptiVocab: Enhancing LLM Efficiency in Focused Domains through Lightweight Vocabulary Adaptation}. 
+arXiv preprint arXiv:2503.19693, 2025. 
+\url{https://arxiv.org/abs/2503.19693}.
+
+\bibitem{herold2025vocabcustomization}
+C.~Herold, M.~Kozielski, N.~Santavas, Y.~Versley, and S.~Khadivi, 
+\textit{Vocabulary Customization for Efficient Domain-Specific LLM Deployment}. 
+arXiv preprint arXiv:2509.26124, 2025. 
+\url{https://arxiv.org/abs/2509.26124}.
+
+\bibitem{onetokenizer}
+D.~Abagyan, A.~R.~Salamanca, A.~F.~Cruz-Salinas, K.~Cao, H.~Lin, A.~Locatelli, M.~Fadaee, A.~Üstün, and S.~Hooker,  
+\textit{One Tokenizer To Rule Them All: Emergent Language Plasticity via Multilingual Tokenizers}.  
+arXiv preprint arXiv:2506.10766, 2025.  
+\url{https://arxiv.org/abs/2506.10766}.
+
+\bibitem{unkseverywhere2024}
+J.~Pfeiffer, I.~Vulić, I.~Gurevych, and S.~Ruder,  
+\textit{UNKs Everywhere: Adapting Multilingual Language Models to New Scripts}.  
+In \textit{Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing (EMNLP)},  
+Online and Punta Cana, Dominican Republic, November 2021, pp.~10186--10203.  
+Association for Computational Linguistics.  
+\url{https://aclanthology.org/2021.emnlp-main.800/}.
+
+\bibitem{uncasedtoken}
+C.~Paik and K.~von der Wense,  
+\textit{The Effectiveness of Uncased Tokenization for Clinical Notes}.  
+In \textit{Findings of the Association for Computational Linguistics: ACL 2025},  
+Vienna, Austria, July 2025, pp.~14986--14992.  
+Association for Computational Linguistics.  
+\url{https://aclanthology.org/2025.findings-acl.775/}.
+
+\bibitem{balde2024medvoc}
+G.~Balde, S.~Roy, M.~Mondal, and N.~Ganguly, 
+\textit{MedVoc: Domain Vocabulary Adaptation for Medical Summarization}. 
+arXiv preprint arXiv:2405.04163, 2024. 
+\url{https://arxiv.org/abs/2405.04163}.
+
+\bibitem{balde2024adaptivebpe}
+G.~Balde, S.~Roy, M.~Mondal, and N.~Ganguly, 
+\textit{Adaptive BPE Tokenization for Enhanced Vocabulary Adaptation in Fine-tuning Pretrained Language Models}. 
+arXiv preprint arXiv:2410.03258, 2024. 
+\url{https://arxiv.org/abs/2410.03258}.
+
+\end{thebibliography}
+
+\end{document}
