@@ -443,8 +443,8 @@ def train_glove_vectors(
     # For FAST_RUN, start with tighter parameters to avoid large cooccurrence files
     _fast_run = os.environ.get("FAST_RUN", "0") == "1"
     if _fast_run:
-        window_size = min(window_size, 10)  # Start with smaller window for fast runs
-        vocab_min_count = max(vocab_min_count, 10)  # Higher min_count reduces vocabulary size
+        window_size = min(window_size, 5)  # Very tight window for fast runs (shuffle fragile)
+        vocab_min_count = max(vocab_min_count, 15)  # Higher min_count significantly reduces vocabulary size
     
     if not os.path.isabs(corpus_path):
         # Auto-resolve to absolute using CWD
@@ -567,7 +567,7 @@ def train_glove_vectors(
     # For fast runs, use even tighter threshold (800MB)
     try:
         _fast_run = os.environ.get("FAST_RUN", "0") == "1"
-        threshold = (800 * 1024 * 1024) if _fast_run else (1536 * 1024 * 1024)  # 800 MB for fast, 1.5 GB otherwise
+        threshold = (500 * 1024 * 1024) if _fast_run else (1536 * 1024 * 1024)  # 500 MB for fast, 1.5 GB otherwise
 
         def _regen_vocab_and_cooccur(_min_count: int, _window: int) -> int:
             with open(corpus_path, "rb") as fin, open(vocab_file, "wb") as fout:
