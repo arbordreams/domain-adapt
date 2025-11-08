@@ -25,7 +25,7 @@ LIB_DIR="${_THIS_DIR}/lib"
 . "${LIB_DIR}/artifacts.sh"
 
 # Defaults for prod
-MODEL_ID="${MODEL_ID:-Qwen/Qwen2-7B}"
+MODEL_ID="${MODEL_ID:-mistralai/Mistral-7B-v0.3}"
 TOP_K="${TOP_K:-8192}"
 PIVOT="${PIVOT:-300}"
 WARMUP_STEPS="${WARMUP_STEPS:-0}"

@@ -32,6 +32,14 @@ PY
   set +e
   step_log="$(with_retry "eval" "${cmd}" "${timeout_s}" "${retries}" 15)"
   local rc=$?
+  # If vLLM failed, try HF once as an automatic fallback
+  if [ "${rc}" -ne 0 ] && [ "${EVAL_BACKEND}" = "vllm" ]; then
+    _ev_log "vLLM eval failed (rc=${rc}); falling back to HF generate once"
+    export EVAL_BACKEND="hf"
+    LAST_EVAL_BACKEND="${EVAL_BACKEND}"
+    step_log="$(with_retry "eval" "${cmd}" "${timeout_s}" 0 5)"
+    rc=$?
+  fi
   set -e
   if [ "${rc}" -ne 0 ]; then
     return "${rc}"

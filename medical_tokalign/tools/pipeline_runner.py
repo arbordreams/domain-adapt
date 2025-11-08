@@ -277,6 +277,15 @@ def run_step(
             "ts": _now(), "step": name, "attempt": attempt,
             "status": "finished", "code": last_code, "duration_s": round(duration, 3),
         })
+        if last_code != 0:
+            try:
+                tail_lines = list(lines_tail)[-80:]
+                telem.write_text(f"[{_now()}] [tail:{name}] --- begin ---")
+                for tl in tail_lines:
+                    telem.write_text(tl)
+                telem.write_text(f"[{_now()}] [tail:{name}] --- end ---")
+            except Exception:
+                pass
 
         # Classify errors to avoid unnecessary retries on fatal conditions
         # Retryable: common transient network/HF issues; Fatal: missing deps, not found, OOM, etc.
@@ -348,7 +357,7 @@ def _monitor_corpus(corpus_cfg: str, telem: Telemetry, stop_evt: threading.Event
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Unattended MedTokAlign Orchestrator (RunPod-ready)")
-    ap.add_argument("--model_id", type=str, default="Qwen/Qwen2-7B")
+    ap.add_argument("--model_id", type=str, default="mistralai/Mistral-7B-v0.3")
     ap.add_argument("--corpus_config", type=str, default=os.path.join(_pkg_root(), "configs", "corpus_biomed.yaml"))
     ap.add_argument("--eval_config", type=str, default=os.path.join(_pkg_root(), "configs", "eval_medical.yaml"))
     ap.add_argument("--top_k", type=int, default=8192)

@@ -40,8 +40,13 @@ def trans2switch_strict(
         trans = json.load(f)
 
     state = src_model.state_dict()
-    embed_key = _EMBED_DICT[src_model.config.model_type]
-    lm_head_key = _LMHEAD_DICT[src_model.config.model_type]
+    model_type = str(getattr(src_model.config, "model_type", "")).lower()
+    if model_type not in _EMBED_DICT or model_type not in _LMHEAD_DICT:
+        raise ValueError(f"Unsupported model_type '{model_type}'. "
+                         f"Known: {sorted(_EMBED_DICT.keys())}. "
+                         f"Please add mapping keys for embed/lm_head for this model.")
+    embed_key = _EMBED_DICT[model_type]
+    lm_head_key = _LMHEAD_DICT[model_type]
     src_embed = state[embed_key]
     src_lm_head = state[lm_head_key]
 

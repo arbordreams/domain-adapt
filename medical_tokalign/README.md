@@ -3,7 +3,7 @@ Medical TokAlign for Llama 3 on RunPod (H100, Single GPU)
 Overview
 - A self-contained tokenizer-alignment extension for medical domains, optimized for one NVIDIA H100 PCIe 80GB on RunPod.
 - Implements a TokAlign‑style approach: builds a term↔token-bundle alignment matrix from robust medical corpora and lexicons, selects high-benefit medical terms to add to the tokenizer, resizes model embeddings, and warm‑initializes new rows.
-- Default target: meta-llama/Meta-Llama-3.1-8B. Backend: vLLM by default; HF fallback; optional TensorRT-LLM stub.
+- Default target: mistralai/Mistral-7B-v0.3. Backend: vLLM by default; HF fallback; optional TensorRT-LLM stub.
 
 Key Features
 - Full adaptation: add medical tokens + resize model embeddings; optional short CLM warmup for new rows only.
@@ -82,7 +82,7 @@ python -m medical_tokalign.src.cli prepare-data --all
 5) Run tokenizer adaptation (TokAlign‑style, adds tokens + resizes embeddings)
 ```
 python -m medical_tokalign.src.cli adapt \
-  --model_id Qwen/Qwen2-7B \
+  --model_id mistralai/Mistral-7B-v0.3 \
   --top_k 8192 \
   --pivot 300 \
   --embedding_backend fasttext \
@@ -114,7 +114,7 @@ Use these consolidated runners for end-to-end flows. Default embeddings backend 
 - Demo (fast smoke/test; no tmux):
   ```
   bash medical_tokalign/scripts/autorun_demo.sh \
-    --model_id meta-llama/Meta-Llama-3.1-8B \
+    --model_id mistralai/Mistral-7B-v0.3 \
     --corpus_config medical_tokalign/configs/corpus_med_tokalign_3gb.yaml \
     --eval_config medical_tokalign/configs/eval_medical_ultra_quick.yaml \
     --top_k 256 --pivot 300 --warmup_steps 0 --quick
@@ -122,7 +122,7 @@ Use these consolidated runners for end-to-end flows. Default embeddings backend 
 - Prod (robust, resumable; tmux default):
   ```
   bash medical_tokalign/scripts/autorun_prod.sh \
-    --model_id meta-llama/Meta-Llama-3.1-8B \
+    --model_id mistralai/Mistral-7B-v0.3 \
   --corpus_config medical_tokalign/configs/corpus_biomed.yaml \
   --eval_config medical_tokalign/configs/eval_medical.yaml \
   --top_k 8192 --pivot 300 --warmup_steps 0
@@ -215,7 +215,7 @@ Troubleshooting
 One‑command End‑to‑End (CLI)
 ```
 python -m medical_tokalign.src.cli pipeline \
-  --model_id meta-llama/Meta-Llama-3.1-8B \
+  --model_id mistralai/Mistral-7B-v0.3 \
   --corpus_config medical_tokalign/configs/corpus_biomed.yaml \
   --eval_config medical_tokalign/configs/eval_medical.yaml \
   --top_k 8192 --pivot 300 --warmup_steps 0
@@ -227,7 +227,7 @@ Smoke Test (quick validation)
 python -m medical_tokalign.src.cli prepare-data --all
 python -m medical_tokalign.src.cli build-corpus --config medical_tokalign/configs/corpus_biomed.yaml
 python -m medical_tokalign.src.cli adapt \
-  --model_id meta-llama/Meta-Llama-3.1-8B \
+  --model_id mistralai/Mistral-7B-v0.3 \
   --top_k 128 --pivot 100 --warmup_steps 0
 # Optionally set small dataset limits in configs/eval_medical.yaml before running eval
 python -m medical_tokalign.src.cli eval --config medical_tokalign/configs/eval_medical.yaml

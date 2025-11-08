@@ -24,7 +24,7 @@ LIB_DIR="${_THIS_DIR}/lib"
 . "${LIB_DIR}/artifacts.sh"
 
 # Defaults for demo
-MODEL_ID="${MODEL_ID:-Qwen/Qwen2-7B}"
+MODEL_ID="${MODEL_ID:-mistralai/Mistral-7B-v0.3}"
 TOP_K="${TOP_K:-256}"
 PIVOT="${PIVOT:-300}"
 WARMUP_STEPS="${WARMUP_STEPS:-0}"
@@ -42,6 +42,14 @@ setup_resources
 preflight_runtime
 
 fail_step="" ; fail_log=""
+
+# Optional cleanup when running quick profile
+if [ "${QUICK_FLAG}" -eq 1 ]; then
+  if [ -x "${_THIS_DIR}/tools/clean_runs.sh" ]; then
+    info "Cleaning previous run artifacts for a fresh quick run"
+    bash "${_THIS_DIR}/tools/clean_runs.sh" || true
+  fi
+fi
 
 # Step: prepare-data (minimal)
 set +e
