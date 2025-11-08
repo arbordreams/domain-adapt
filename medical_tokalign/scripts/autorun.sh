@@ -124,7 +124,8 @@ if [[ "${FAST_RUN:-0}" = "1" ]]; then
   # Disable warmup by default for speed
   WARMUP_STEPS="0"
   # Smaller GloVe corpora and fewer training iterations (env-driven, optional)
-  export GLOVE_CORPUS_MAX_BYTES="${GLOVE_CORPUS_MAX_BYTES:-300000000}"
+  # Force override to 500MB for fast run (better quality/speed balance than 300MB)
+  export GLOVE_CORPUS_MAX_BYTES="500000000"
   export GLOVE_MAX_ITER="${GLOVE_MAX_ITER:-8}"
   # Keep vector size at 300 for compatibility unless explicitly overridden
   export GLOVE_VECTOR_SIZE="${GLOVE_VECTOR_SIZE:-300}"
