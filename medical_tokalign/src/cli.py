@@ -19,6 +19,9 @@ from . import api as api
 def _pkg_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+# Ensure HF accelerated transfer unless explicitly disabled by env
+os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+
 
 def _default_data_dirs() -> tuple[str, str, str, str, str]:
     pkg_root = _pkg_root()

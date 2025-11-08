@@ -102,9 +102,23 @@ ensure_env() {
   export HF_DATASETS_CACHE="${HF_DATASETS_CACHE:-${HF_HOME}/datasets}"
   export HF_HUB_CACHE="${HF_HUB_CACHE:-${HF_HOME}/hub}"
   export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/hub}"
+  # Prefer HuggingFace accelerated transfer when available
+  export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
   export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
   # Propagate embedding backend to environment for helpers
   export EMBEDDING_BACKEND="${EMBEDDING_BACKEND}"
+  # Best-effort detection (log only) of hf_transfer presence
+  if command -v python >/dev/null 2>&1; then
+    if python - <<'PY' 2>/dev/null; then
+import importlib.util, sys
+sys.exit(0 if importlib.util.find_spec("hf_transfer") is not None else 1)
+PY
+    then
+      info "hf_transfer available; fast transfer enabled"
+    else
+      warn "hf_transfer not installed; fast transfer may be disabled by runtime"
+    fi
+  fi
 }
 
 # Acquire single-run lock

@@ -94,21 +94,21 @@ build_corpus() {
       return 0
     fi
   fi
-  # Preflight (best-effort in quick mode; skip entirely to avoid script-based dataset errors)
+  # Preflight (best-effort in quick mode)
   if [ "${quick}" != "1" ]; then
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --preflight_only ) || {
+    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=1 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --preflight_only ) || {
       error "Preflight failed for ${use_cfg}"
       return 2
     }
   fi
   # Run build (non-strict in quick mode to tolerate partial availability)
   if [ "${quick}" = "1" ]; then
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 STRICT_SOURCES=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" ) || {
+    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=1 STRICT_SOURCES=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" ) || {
       warn "Build-corpus had errors in quick mode; continuing anyway"
       return 0
     }
   else
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --strict_sources )
+    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=1 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --strict_sources )
   fi
 }
 
