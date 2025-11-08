@@ -252,13 +252,13 @@ def build_source(
                     start += step
     finally:
         try:
-        f.close()
+            f.close()
         except Exception:
             pass
         if not use_append:
             try:
                 if os.path.exists(tmp_path):
-            os.replace(tmp_path, out_path)
+                    os.replace(tmp_path, out_path)
             except Exception:
                 pass
     return {"seen": seen, "kept": kept, "bytes": written_bytes}
