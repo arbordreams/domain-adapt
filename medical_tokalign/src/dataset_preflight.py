@@ -11,6 +11,8 @@ class SourceSpec:
     subset: Optional[str]
     splits: List[str]
     text_fields: List[str]
+    kind: str = "hf"
+    urls: Optional[List[str]] = None
 
 
 @dataclass
@@ -57,6 +59,32 @@ def check_source(spec: SourceSpec) -> SourceReport:
     except Exception:
         hub_reason = None
 
+    # Parquet preflight path (does not require datasets lib)
+    if spec.kind.strip().lower() == "parquet":
+        paths = list(spec.urls or [])
+        if not paths:
+            return SourceReport(dataset="parquet", subset=None, ok=False, reason="no parquet paths", split_reports=[])
+        try:
+            import pyarrow.dataset as pyds  # type: ignore
+        except Exception as e:  # noqa: BLE001
+            return SourceReport(dataset="parquet", subset=None, ok=False, reason=f"pyarrow missing: {e}", split_reports=[])
+        try:
+            dataset = pyds.dataset(paths, format="parquet")
+            cols = set(dataset.schema.names or [])
+            fields_present = [c for c in (spec.text_fields or ["text"]) if c in cols]
+            # Attempt to read a tiny batch
+            got_any = False
+            for _ in dataset.to_batches(batch_size=1):
+                got_any = True
+                break
+            ok = bool(fields_present) and got_any
+            rep = SplitReport(split="parquet", ok=ok, reason=None if ok else "missing fields or empty", fields_present=fields_present)
+            return SourceReport(dataset="parquet", subset=None, ok=ok, reason=None, split_reports=[rep])
+        except Exception as e:  # noqa: BLE001
+            rep = SplitReport(split="parquet", ok=False, reason=str(e), fields_present=[])
+            return SourceReport(dataset="parquet", subset=None, ok=False, reason=str(e), split_reports=[rep])
+
+    # HF datasets preflight (default)
     try:
         from datasets import load_dataset
     except Exception as e:  # noqa: BLE001

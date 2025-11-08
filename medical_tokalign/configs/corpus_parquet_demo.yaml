@@ -1,0 +1,20 @@
+random_seed: 17
+target_total_bytes: 20000000
+output_dir: medical_tokalign/data/biomed_corpus
+prevent_eval_contamination: false
+near_dup: none
+defaults:
+  min_chars: 120
+  max_chars: 20000
+sources:
+  pubmed_rct_pq:
+    enabled: true
+    type: parquet
+    # Replace with real parquet paths or load via snapshot tool
+    urls:
+      - /workspace/datasets/pubmed_rct/train.parquet
+      - /workspace/datasets/pubmed_rct/validation.parquet
+      - /workspace/datasets/pubmed_rct/test.parquet
+    text_fields: [text, article, abstract]
+    target_bytes: 20000000
+

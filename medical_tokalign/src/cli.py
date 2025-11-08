@@ -167,6 +167,8 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
                     subset=s.subset,
                     splits=s.splits or ["train"],
                     text_fields=s.text_fields or ["text"],
+                    kind=str(getattr(s, "kind", "hf") or "hf"),
+                    urls=list(getattr(s, "urls", []) or []),
                 ),
             )
         )
