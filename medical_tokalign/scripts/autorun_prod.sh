@@ -53,6 +53,7 @@ fi
 
 acquire_lock
 setup_resources
+preflight_runtime
 
 fail_step="" ; fail_log=""
 

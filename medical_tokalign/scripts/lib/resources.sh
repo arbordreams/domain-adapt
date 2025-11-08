@@ -110,5 +110,25 @@ setup_resources() {
   _rs_log "vCPUs=${vcpus} RAM_MB=${ram_mb} OMP=${OMP_NUM_THREADS} MKL=${MKL_NUM_THREADS} OPENBLAS=${OPENBLAS_NUM_THREADS} NUMEXPR=${NUMEXPR_NUM_THREADS} EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-fasttext} GLOVE_MEMORY_MB=${GLOVE_MEMORY_MB:-} GLOVE_SHUFFLE_MEMORY_MB=${GLOVE_SHUFFLE_MEMORY_MB:-} GLOVE_THREADS=${GLOVE_THREADS:-}"
 }
 
+# Runtime environment preflight: log core library versions and HF settings
+preflight_runtime() {
+  if ! command -v python >/dev/null 2>&1; then
+    _rs_log "python=missing (cannot preflight)"
+    return 0
+  fi
+  python - <<'PY' 2>/dev/null || true
+import os
+def ver(m):
+  try:
+    mod=__import__(m); return getattr(mod, "__version__", "unknown")
+  except Exception as e:
+    return f"missing({type(e).__name__})"
+mods=["torch","torchvision","torchaudio","transformers","datasets","huggingface_hub","hf_transfer","gensim","numpy"]
+print("[VERS]", " ".join(f"{m}={ver(m)}" for m in mods))
+print("[HF]", f"HF_HUB_ENABLE_HF_TRANSFER={os.environ.get('HF_HUB_ENABLE_HF_TRANSFER','')}",
+             f"TRANSFORMERS_NO_TORCHVISION={os.environ.get('TRANSFORMERS_NO_TORCHVISION','')}")
+PY
+}
+
 # End of resources.sh
 

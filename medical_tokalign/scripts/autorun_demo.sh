@@ -38,6 +38,7 @@ parse_args "$@"
 ensure_env
 acquire_lock
 setup_resources
+preflight_runtime
 
 fail_step="" ; fail_log=""
 
