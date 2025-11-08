@@ -151,6 +151,9 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
 
     # Preflight (fail fast if any source is missing/inaccessible)
     strict_sources = bool(getattr(args, "strict_sources", True))
+    # Allow env override for quick/demo modes
+    if os.environ.get("STRICT_SOURCES", "").lower() in ("0", "false", "no"):
+        strict_sources = False
     preflight_specs: list[tuple[str, preflight.SourceSpec]] = []
     for s in sources_cfg:
         preflight_specs.append(

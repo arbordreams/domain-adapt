@@ -57,7 +57,7 @@ cfg['defaults']['max_chars'] = int(cfg['defaults'].get('max_chars', 20000))
 cfg['target_total_bytes'] = int(min(20_000_000, int(cfg.get('target_total_bytes', 20_000_000))))
 srcs = cfg.get('sources', {}) or {}
 # Disable sources known to require scripts (datasets 3.x incompatible)
-problematic = ['meddialog', 'ccdv_pubmed_summ']
+problematic = ['meddialog', 'ccdv_pubmed_summ', 'pubmed_abstracts']
 for k, sc in srcs.items():
     if not isinstance(sc, dict): 
         continue
@@ -103,7 +103,7 @@ build_corpus() {
   fi
   # Run build (non-strict in quick mode to tolerate partial availability)
   if [ "${quick}" = "1" ]; then
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" ) || {
+    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=0 STRICT_SOURCES=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" ) || {
       warn "Build-corpus had errors in quick mode; continuing anyway"
       return 0
     }
