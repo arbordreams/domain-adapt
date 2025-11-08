@@ -186,7 +186,9 @@ if [[ "$ADAPT_RC" -eq 0 ]]; then
     EVAL_BACKEND="vllm"
   fi
   export EVAL_BACKEND
-  python -m medical_tokalign.src.cli eval --config "$EVAL_CONFIG"
+  # Use quick eval by default (allow env override)
+  EFF_EVAL_CONFIG="${EVAL_CONFIG_OVERRIDE:-$ROOT_DIR/configs/eval_medical_quick.yaml}"
+  python -m medical_tokalign.src.cli eval --config "$EFF_EVAL_CONFIG"
   EVAL_RC=$?
   echo "[autorun] eval rc=$EVAL_RC"
 else
