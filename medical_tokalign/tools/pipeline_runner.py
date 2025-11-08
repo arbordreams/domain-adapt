@@ -231,11 +231,11 @@ def run_step(
                 if not drained_any:
                     try:
                         # If nothing was immediately available, block briefly for next line
-                        line = q.get(timeout=0.25)
-                        telem.write_text(line)
+                    line = q.get(timeout=0.25)
+                    telem.write_text(line)
                         lines_tail.append(line)
-                    except queue.Empty:
-                        pass
+                except queue.Empty:
+                    pass
                 if end_by and time.time() > end_by:
                     raise TimeoutError(f"step '{name}' timed out after {timeout_s}s")
                 # Improved completion detection: wait for process exit and pump thread to finish,
