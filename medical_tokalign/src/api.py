@@ -440,6 +440,12 @@ def train_glove_vectors(
 
     Returns the path to the created vector .txt file (save_file.txt).
     """
+    # For FAST_RUN, start with tighter parameters to avoid large cooccurrence files
+    _fast_run = os.environ.get("FAST_RUN", "0") == "1"
+    if _fast_run:
+        window_size = min(window_size, 10)  # Start with smaller window for fast runs
+        vocab_min_count = max(vocab_min_count, 10)  # Higher min_count reduces vocabulary size
+    
     if not os.path.isabs(corpus_path):
         # Auto-resolve to absolute using CWD
         corpus_path = os.path.abspath(corpus_path)
