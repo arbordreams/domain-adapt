@@ -66,13 +66,13 @@ def warmup_rows(
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
-    base_model = AutoModelForCausalLM.from_pretrained(base_model_id, torch_dtype=dtype)
+    base_model = AutoModelForCausalLM.from_pretrained(base_model_id, dtype=dtype)
     base_vocab = base_model.get_input_embeddings().weight.shape[0]
     del base_model
     torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
     tok = AutoTokenizer.from_pretrained(tokenizer_dir, use_fast=True)
-    model = AutoModelForCausalLM.from_pretrained(adapted_model_path, torch_dtype=dtype)
+    model = AutoModelForCausalLM.from_pretrained(adapted_model_path, dtype=dtype)
     model = maybe_compile(model, enabled=True)
     model.train()
     model.to(device)

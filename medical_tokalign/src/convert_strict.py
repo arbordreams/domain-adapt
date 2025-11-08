@@ -28,7 +28,7 @@ def trans2switch_strict(
     trust_remote_code: bool = False,
 ):
     src_model = AutoModelForCausalLM.from_pretrained(
-        src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=trust_remote_code
+        src_clm_path, dtype=torch.bfloat16, trust_remote_code=trust_remote_code
     )
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path, trust_remote_code=trust_remote_code)
 

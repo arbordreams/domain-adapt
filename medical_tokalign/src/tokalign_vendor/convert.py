@@ -25,7 +25,7 @@ def trans2switch(
     tgt_tok_path="./data/gemma-2b",
     random_shuffle=-1,
 ):
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, dtype=torch.bfloat16, trust_remote_code=True)
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
     # Load trans matrix
@@ -81,7 +81,7 @@ def random_permute(
     random.seed(seed)
     set_seed(seed)
 
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, dtype=torch.bfloat16, trust_remote_code=True)
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
     src_params = dict(src_model.named_parameters())
@@ -123,7 +123,7 @@ def random_initial_all(
     random.seed(seed)
     set_seed(seed)
 
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, dtype=torch.bfloat16, trust_remote_code=True)
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
     
     src_params = dict(src_model.named_parameters())
@@ -160,7 +160,7 @@ def random_initial_aug(
     random.seed(seed)
     set_seed(seed)
 
-    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, torch_dtype=torch.bfloat16, trust_remote_code=True)
+    src_model = AutoModelForCausalLM.from_pretrained(src_clm_path, dtype=torch.bfloat16, trust_remote_code=True)
     tgt_tok = AutoTokenizer.from_pretrained(tgt_tok_path,  trust_remote_code=True)
 
     src_model.resize_token_embeddings(len(tgt_tok))

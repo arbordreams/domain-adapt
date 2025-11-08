@@ -104,6 +104,8 @@ ensure_env() {
   export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-${HF_HOME}/hub}"
   # Prefer HuggingFace accelerated transfer when available
   export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
+  # Avoid importing torchvision in transformers unless strictly required
+  export TRANSFORMERS_NO_TORCHVISION="${TRANSFORMERS_NO_TORCHVISION:-1}"
   export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
   # Propagate embedding backend to environment for helpers
   export EMBEDDING_BACKEND="${EMBEDDING_BACKEND}"

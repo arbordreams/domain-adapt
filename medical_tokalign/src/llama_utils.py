@@ -108,7 +108,7 @@ def load_hf_model_and_tokenizer(
         pass
 
     from_kwargs = dict(
-        torch_dtype=dtype,
+        dtype=dtype,
         low_cpu_mem_usage=True,
         trust_remote_code=False,
         attn_implementation=resolved_attn,
