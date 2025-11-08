@@ -87,7 +87,11 @@ run_adapt() {
       _ad_log "Adapt failed after ${attempt} attempt(s)."
       return "${rc}"
     fi
-    _ad_log "Adapt failed (rc=${rc}); sleeping ${backoff_s}s before retry"
+    # Best-effort cleanup of stray adapt processes between attempts
+    if command -v pkill >/dev/null 2>&1; then
+      pkill -f "python -m medical_tokalign.src.cli adapt" 2>/dev/null || true
+    fi
+    _ad_log "Adapt failed (rc=${rc}); cleanup done; sleeping ${backoff_s}s before retry"
     sleep "${backoff_s}"
   done
 }
