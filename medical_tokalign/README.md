@@ -54,21 +54,25 @@ RunPod Quickstart
    - Image: runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
    - Hardware: One H100 PCIe (80GB)
 
-2) Environment (set once per session):
+2) Environment (set once per session) and bootstrap:
 ```
 export CUDA_VISIBLE_DEVICES=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export HF_HOME=/workspace/.cache/huggingface
 # If the model is gated, set your token:
 export HF_TOKEN=hf_...
+# Prefer fast file transfers and avoid unnecessary vision deps:
+export HF_HUB_ENABLE_HF_TRANSFER=1
+export TRANSFORMERS_NO_TORCHVISION=1
+
+# Install pinned deps (GPU/CUDA 12.x) or CPU-only:
+# GPU:
+bash medical_tokalign/scripts/bootstrap_env.sh --gpu-cu12
+# CPU:
+bash medical_tokalign/scripts/bootstrap_env.sh
 ```
 
-3) Install
-```
-# Torch 2.8.0 and CUDA 12.8.1 come preinstalled in this image.
-# Use the bootstrap script to install Python deps and build GloVe tools.
-bash medical_tokalign/scripts/bootstrap_runpod.sh
-```
+3) (Optional) Legacy bootstrap_runpod.sh retains data/tooling helpers but `bootstrap_env.sh` now manages Python deps.
 
 4) Prepare data (downloads/caches standard HF splits locally)
 ```
@@ -204,6 +208,8 @@ Troubleshooting
 - Gated models: export `HF_TOKEN` and ensure it has access to the Llama weights.
 - SciSpacy model: if auto-download fails, set `SCISPACY_MODEL_URL` to a direct wheel URL and rerun the data script.
 - vLLM wheels: on fresh Torch/CUDA combos vLLM may be unavailable. The pipeline will fall back to HF automatically. You can also set `eval_backend: hf` in `configs/eval_medical.yaml` to force HF.
+- Dataset scripts errors on HF 4.x: we pin `datasets==2.21.x`. If you see “Dataset scripts are no longer supported”, run `bash scripts/bootstrap_env.sh` to install pins.
+- Qwen2 import error / torchvision: export `TRANSFORMERS_NO_TORCHVISION=1` (default) or install a compatible torchvision; re-run `bootstrap_env.sh --gpu-cu12`.
 
 
 One‑command End‑to‑End (CLI)
