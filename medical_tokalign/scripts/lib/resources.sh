@@ -127,6 +127,8 @@ mods=["torch","torchvision","torchaudio","transformers","datasets","huggingface_
 print("[VERS]", " ".join(f"{m}={ver(m)}" for m in mods))
 print("[HF]", f"HF_HUB_ENABLE_HF_TRANSFER={os.environ.get('HF_HUB_ENABLE_HF_TRANSFER','')}",
              f"TRANSFORMERS_NO_TORCHVISION={os.environ.get('TRANSFORMERS_NO_TORCHVISION','')}")
+# Extra eval deps
+print("[EVAL_DEPS]", "rouge_score="+ver("rouge_score"), "sacrebleu="+ver("sacrebleu"))
 PY
 }
 

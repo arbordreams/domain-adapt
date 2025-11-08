@@ -26,4 +26,6 @@ psutil>=5.9.8
 rich>=13.7.1
 orjson>=3.10.3
 xxhash>=3.4.1
+rouge-score==0.1.2
+sacrebleu==2.4.2
 
