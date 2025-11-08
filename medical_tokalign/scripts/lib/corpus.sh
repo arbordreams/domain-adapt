@@ -102,8 +102,9 @@ build_corpus() {
     }
   fi
   # Run build (non-strict in quick mode to tolerate partial availability)
+  # Use --fresh in quick mode to clear old corpus files and respect size limits
   if [ "${quick}" = "1" ]; then
-    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=1 STRICT_SOURCES=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" ) || {
+    ( cd "${REPO_ROOT}" && HF_HUB_ENABLE_HF_TRANSFER=1 STRICT_SOURCES=0 python -m medical_tokalign.src.cli build-corpus --config "${use_cfg}" --fresh ) || {
       warn "Build-corpus had errors in quick mode; continuing anyway"
       return 0
     }
