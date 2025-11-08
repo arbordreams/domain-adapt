@@ -357,10 +357,10 @@ def main() -> None:
     for s in sources_cfg:
         out_path = os.path.join(out_root, f"{s.name}.jsonl")
         try:
-        if os.path.isfile(out_path):
+            if os.path.isfile(out_path):
                 global_written += os.path.getsize(out_path)
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     # Optional MinHash near-dup (best effort)
     near_dup_lsh = None
