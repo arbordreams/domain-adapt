@@ -1,0 +1,16 @@
+# Example manifest of pre-snapshotted Parquet sources.
+# Each entry can be referenced from corpus configs with type: parquet and urls: [...]
+# Fields:
+# - paths: list of parquet files or directories
+# - text_fields: preferred columns to read; first existing is used
+# - size_bytes: informational (optional)
+# - checksum: optional map of file->sha256 for integrity verification
+pubmed_rct_parquet:
+  paths:
+    - /workspace/datasets/pubmed_rct/train.parquet
+    - /workspace/datasets/pubmed_rct/validation.parquet
+    - /workspace/datasets/pubmed_rct/test.parquet
+  text_fields: [text, article, abstract]
+  size_bytes: 10485760
+  checksum: {}
+

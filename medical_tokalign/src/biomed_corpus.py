@@ -147,6 +147,49 @@ def _iter_http_texts(urls: List[str]) -> Iterator[str]:
             continue
 
 
+def _iter_parquet_texts(paths: List[str], fields: List[str]) -> Iterator[str]:
+    """Yield text from parquet files via pyarrow.dataset with low memory usage."""
+    try:
+        import pyarrow.dataset as ds  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError("pyarrow is required for parquet sources") from e
+    if not paths:
+        return iter(())  # type: ignore[return-value]
+    try:
+        dataset = ds.dataset(paths, format="parquet")
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"failed to open parquet dataset: {e}") from e
+    all_cols = list(dataset.schema.names or [])
+    want = [c for c in (fields or ["text"]) if c in all_cols]
+    if not want and all_cols:
+        want = [all_cols[0]]
+    if not want:
+        return iter(())  # type: ignore[return-value]
+    for batch in dataset.to_batches(columns=want, batch_size=1024):
+        pdict = batch.to_pydict()
+        # length by first chosen column
+        length = len(pdict.get(want[0], []) or [])
+        for i in range(length):
+            parts: List[str] = []
+            for c in want:
+                col = pdict.get(c, [])
+                v = col[i] if i < len(col) else None
+                if v is None:
+                    continue
+                if isinstance(v, str):
+                    parts.append(v)
+                elif isinstance(v, list):
+                    parts.extend(str(x) for x in v if isinstance(x, str))
+                else:
+                    try:
+                        parts.append(str(v))
+                    except Exception:
+                        pass
+            s = " ".join(p for p in parts if p).strip()
+            if s:
+                yield s
+
+
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
@@ -189,6 +232,10 @@ def build_source(
     elif src.kind == "http_list":
         def gen_texts() -> Iterator[str]:
             for t in _iter_http_texts(src.urls or []):
+                yield t
+    elif src.kind == "parquet":
+        def gen_texts() -> Iterator[str]:
+            for t in _iter_parquet_texts(src.urls or [], src.text_fields or ["text"]):
                 yield t
     else:
         def gen_texts() -> Iterator[str]:
