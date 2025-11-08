@@ -21,7 +21,7 @@ TOP_K="8192"
 PIVOT="300"
 WARMUP_STEPS="3000"
 MAX_RETRIES="2"
-EVAL_CONFIG="$ROOT_DIR/configs/eval_medical.yaml"
+EVAL_CONFIG="$ROOT_DIR/configs/eval_medical_quick.yaml"
 USE_TMUX="${USE_TMUX:-1}"
 
 while [[ $# -gt 0 ]]; do
