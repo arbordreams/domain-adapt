@@ -104,7 +104,10 @@ def prepare_medical_benchmarks_all(bench_dir: str, proc_dir: str) -> None:
     # MedNLI (BigBio pairs)
     print("[MedTokAlign] Downloading MedNLI (bigbio/mednli:pairs)...")
     try:
-        mednli = load_dataset("bigbio/mednli", "pairs", cache_dir=cache_dir, trust_remote_code=True)
+        try:
+            mednli = load_dataset("bigbio/mednli", "pairs", cache_dir=cache_dir, trust_remote_code=True)  # type: ignore[call-arg]
+        except TypeError:
+            mednli = load_dataset("bigbio/mednli", "pairs", cache_dir=cache_dir)
         for split in mednli:
             _save_jsonl(mednli[split], os.path.join(bench_dir, f"mednli_{split}.jsonl"))
     except Exception:
@@ -113,7 +116,10 @@ def prepare_medical_benchmarks_all(bench_dir: str, proc_dir: str) -> None:
     # NCBI-Disease NER (BigBio)
     print("[MedTokAlign] Downloading NCBI-Disease (bigbio_ner)...")
     try:
-        ncbi = load_dataset("bigbio/ncbi_disease", "bigbio_ner", cache_dir=cache_dir, trust_remote_code=True)
+        try:
+            ncbi = load_dataset("bigbio/ncbi_disease", "bigbio_ner", cache_dir=cache_dir, trust_remote_code=True)  # type: ignore[call-arg]
+        except TypeError:
+            ncbi = load_dataset("bigbio/ncbi_disease", "bigbio_ner", cache_dir=cache_dir)
         for split in ncbi:
             _save_jsonl(ncbi[split], os.path.join(bench_dir, f"ncbi_disease_{split}.jsonl"))
     except Exception:
@@ -122,7 +128,10 @@ def prepare_medical_benchmarks_all(bench_dir: str, proc_dir: str) -> None:
     # BC5CDR NER (BigBio)
     print("[MedTokAlign] Downloading BC5CDR (bigbio_ner)...")
     try:
-        bc5 = load_dataset("bigbio/bc5cdr", "bigbio_ner", cache_dir=cache_dir, trust_remote_code=True)
+        try:
+            bc5 = load_dataset("bigbio/bc5cdr", "bigbio_ner", cache_dir=cache_dir, trust_remote_code=True)  # type: ignore[call-arg]
+        except TypeError:
+            bc5 = load_dataset("bigbio/bc5cdr", "bigbio_ner", cache_dir=cache_dir)
         for split in bc5:
             _save_jsonl(bc5[split], os.path.join(bench_dir, f"bc5cdr_{split}.jsonl"))
     except Exception:
@@ -140,7 +149,10 @@ def prepare_medical_benchmarks_all(bench_dir: str, proc_dir: str) -> None:
     # PubMed RCT (perplexity corpus) → processed/
     print("[MedTokAlign] Downloading PubMed RCT (for perplexity corpus)...")
     try:
-        rct = load_dataset("bigbio/pubmed_rct", cache_dir=cache_dir, trust_remote_code=True)
+        try:
+            rct = load_dataset("bigbio/pubmed_rct", cache_dir=cache_dir, trust_remote_code=True)  # type: ignore[call-arg]
+        except TypeError:
+            rct = load_dataset("bigbio/pubmed_rct", cache_dir=cache_dir)
         # Save only test split by default
         if "test" in rct:
             _save_jsonl(rct["test"], os.path.join(proc_dir, "pubmed_rct_test.jsonl"))

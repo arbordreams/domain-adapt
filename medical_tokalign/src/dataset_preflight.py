@@ -67,11 +67,17 @@ def check_source(spec: SourceSpec) -> SourceReport:
         reason = None
         fields_present: List[str] = []
         try:
-            dargs: Dict[str, object] = {"split": sp, "trust_remote_code": True}
+            dargs: Dict[str, object] = {"split": sp}
             if sb is not None:
-                ds_obj = load_dataset(ds, sb, streaming=True, **dargs)
+                try:
+                    ds_obj = load_dataset(ds, sb, streaming=True, trust_remote_code=True, **dargs)  # type: ignore[call-arg]
+                except TypeError:
+                    ds_obj = load_dataset(ds, sb, streaming=True, **dargs)
             else:
-                ds_obj = load_dataset(ds, streaming=True, **dargs)
+                try:
+                    ds_obj = load_dataset(ds, streaming=True, trust_remote_code=True, **dargs)  # type: ignore[call-arg]
+                except TypeError:
+                    ds_obj = load_dataset(ds, streaming=True, **dargs)
             # Pull one sample
             it = iter(ds_obj)
             ex = next(it, None)

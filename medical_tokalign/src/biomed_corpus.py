@@ -69,11 +69,16 @@ def _iter_hf_records(dataset: str, subset: Optional[str], splits: List[str]) -> 
             # Skip unknown split silently; we'll warn only on load failure
             continue
         try:
+            # Prefer streaming; handle API changes where 'trust_remote_code' is removed.
             try:
-                ds = load_dataset(dataset, subset, split=sp, streaming=True, trust_remote_code=True)
+                ds = load_dataset(dataset, subset, split=sp, streaming=True, trust_remote_code=True)  # type: ignore[call-arg]
+            except TypeError:
+                ds = load_dataset(dataset, subset, split=sp, streaming=True)
             except Exception:
-                # Try without streaming if unavailable
-                ds = load_dataset(dataset, subset, split=sp, trust_remote_code=True)
+                try:
+                    ds = load_dataset(dataset, subset, split=sp, trust_remote_code=True)  # type: ignore[call-arg]
+                except TypeError:
+                    ds = load_dataset(dataset, subset, split=sp)
             for ex in ds:
                 yield dict(ex)
         except Exception as e:
