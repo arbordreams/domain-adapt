@@ -186,15 +186,14 @@ with_retry() {
 # Utility: discover latest adapted/eval dirs
 latest_dir() {
   local parent="$1"
-  [ -d "${parent}" ] || { echo ""; return 0; }
-  # ls sorted; take last
-  ls -1 "${parent}" 2>/dev/null | sort | tail -n 1 | while read -r p; do
-    if [ -n "${p}" ] && [ -d "${parent}/${p}" ]; then
-      echo "${parent}/${p}"
-      return 0
-    fi
-  done
-  echo ""
+  [ -d "${parent}" ] || { return 0; }
+  # Take last entry by name (stable enough for timestamped dirs) and ensure it's a directory.
+  # Avoid subshell 'while ... |' which can lead to extra newlines; emit at most one line.
+  local last
+  last="$(ls -1 "${parent}" 2>/dev/null | sort | tail -n 1)"
+  if [ -n "${last}" ] && [ -d "${parent}/${last}" ]; then
+    printf "%s" "${parent}/${last}"
+  fi
 }
 
 # End of common.sh

@@ -119,9 +119,9 @@ Use these consolidated runners for end-to-end flows. Default embeddings backend 
   ```
   bash medical_tokalign/scripts/autorun_prod.sh \
     --model_id meta-llama/Meta-Llama-3.1-8B \
-    --corpus_config medical_tokalign/configs/corpus_biomed.yaml \
-    --eval_config medical_tokalign/configs/eval_medical.yaml \
-    --top_k 8192 --pivot 300 --warmup_steps 0
+  --corpus_config medical_tokalign/configs/corpus_biomed.yaml \
+  --eval_config medical_tokalign/configs/eval_medical.yaml \
+  --top_k 8192 --pivot 300 --warmup_steps 0
   # Run inline (no tmux)
   bash medical_tokalign/scripts/autorun_prod.sh --no-tmux [...]
   ```

@@ -60,6 +60,9 @@ cleanup_glove_intermediates() {
         "${gdir}/cooccurrence.shuf.vec-source.bin" \
         "${gdir}/cooccurrence.vec-target.bin" \
         "${gdir}/cooccurrence.shuf.vec-target.bin" || true
+  # Best-effort cleanup of temporary shuffle files that some environments create
+  rm -f "${REPO_ROOT}/temp_shuffle_"*.bin 2>/dev/null || true
+  rm -f "${gdir}/temp_shuffle_"*.bin 2>/dev/null || true
   _gl_log "Cleaned GloVe intermediates"
 }
 
