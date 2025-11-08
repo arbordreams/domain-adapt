@@ -582,7 +582,8 @@ def train_glove_vectors(
 
         _co_size = os.path.getsize(co_file) if os.path.exists(co_file) else 0
         if _co_size > threshold:
-            print(f"[glove] cooccur too large: {_co_size} bytes (>1.5GB); tightening and regenerating", flush=True)
+            threshold_mb = threshold // (1024 * 1024)
+            print(f"[glove] cooccur too large: {_co_size} bytes (>{threshold_mb}MB); tightening and regenerating", flush=True)
             window_size = 5
             vocab_min_count = max(int(vocab_min_count), 20)
             _co_size = _regen_vocab_and_cooccur(vocab_min_count, window_size)
