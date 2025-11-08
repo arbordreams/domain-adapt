@@ -46,7 +46,7 @@ _make_quick_overlay() {
     cp "${in_cfg}" "${out_cfg}"
     return 0
   fi
-  python - "${in_cfg}" "${out_cfg}" <<PY
+  python - "${in_cfg}" "${out_cfg}" <<PY || cp "${in_cfg}" "${out_cfg}"
 import sys, yaml
 inp, outp = sys.argv[1], sys.argv[2]
 cfg = yaml.safe_load(open(inp, 'r', encoding='utf-8'))
