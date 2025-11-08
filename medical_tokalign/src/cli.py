@@ -169,6 +169,7 @@ def cmd_build_corpus(args: argparse.Namespace) -> None:
                     text_fields=s.text_fields or ["text"],
                     kind=str(getattr(s, "kind", "hf") or "hf"),
                     urls=list(getattr(s, "urls", []) or []),
+                    checksums=dict(getattr(s, "checksums", {}) or {}),
                 ),
             )
         )

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+import hashlib
+import os
 
 
 @dataclass
@@ -13,6 +15,7 @@ class SourceSpec:
     text_fields: List[str]
     kind: str = "hf"
     urls: Optional[List[str]] = None
+    checksums: Optional[Dict[str, str]] = None
 
 
 @dataclass
@@ -78,6 +81,26 @@ def check_source(spec: SourceSpec) -> SourceReport:
                 got_any = True
                 break
             ok = bool(fields_present) and got_any
+            # Optional checksum verification
+            if ok and spec.checksums:
+                for p in paths:
+                    want = spec.checksums.get(p)
+                    if not want:
+                        continue
+                    h = hashlib.sha256()
+                    try:
+                        with open(p, "rb") as f:
+                            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                                h.update(chunk)
+                        got = h.hexdigest()
+                        if got.lower() != want.lower():
+                            ok = False
+                            reason = f"checksum mismatch for {p}"
+                            rep = SplitReport(split="parquet", ok=False, reason=reason, fields_present=fields_present)
+                            return SourceReport(dataset="parquet", subset=None, ok=False, reason=reason, split_reports=[rep])
+                    except Exception as e:  # noqa: BLE001
+                        rep = SplitReport(split="parquet", ok=False, reason=f"checksum read failed: {e}", fields_present=fields_present)
+                        return SourceReport(dataset="parquet", subset=None, ok=False, reason=str(e), split_reports=[rep])
             rep = SplitReport(split="parquet", ok=ok, reason=None if ok else "missing fields or empty", fields_present=fields_present)
             return SourceReport(dataset="parquet", subset=None, ok=ok, reason=None, split_reports=[rep])
         except Exception as e:  # noqa: BLE001

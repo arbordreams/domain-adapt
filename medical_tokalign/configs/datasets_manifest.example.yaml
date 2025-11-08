@@ -12,5 +12,5 @@ pubmed_rct_parquet:
     - /workspace/datasets/pubmed_rct/test.parquet
   text_fields: [text, article, abstract]
   size_bytes: 10485760
-  checksum: {}
+  checksums: {}
 
