@@ -57,73 +57,66 @@ def select_terms(
     bench_dir: str,
     proc_dir: str,
     top_k: int,
-    sample_per_term: int = 8,
+    sample_per_term: int = 0,
     max_term_len: int = 64,
 ) -> Tuple[List[str], Dict[str, float]]:
     tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
     base_vocab = set(tok.get_vocab().keys())
 
-    # 1) Count raw term frequency from text using a conservative medical-ish regex
+    # 1) Stream texts once: collect term frequencies and document frequencies; estimate boundary consistency on the fly
     token_re = re.compile(r"[A-Za-z][A-Za-z0-9_\-/]{3,}")
     freq: Counter[str] = Counter()
-    examples: List[str] = []
-    for t in iter_med_texts(bench_dir, proc_dir):
-        examples.append(t)
-        for w in token_re.findall(t):
-            if len(w) <= max_term_len:
-                freq[w] += 1
-
-    # candidate pool: top 3x requested, skipping existing vocab entries exactly
-    candidates = []
-    for w, _ in freq.most_common(top_k * 3):
-        if w not in base_vocab:
-            candidates.append(w)
-    if not candidates:
-        return [], {}
-
-    # 2) Compute fragmentation gain and boundary consistency (sampled)
-    # fragmentation = (token_count - 1) * frequency
-    # boundary_consistency ≈ fraction of sampled contexts that tokenize to the same token count as isolated
-    scores: Dict[str, float] = {}
-
-    # pre-tokenize isolated terms once
+    docfreq: Counter[str] = Counter()
     isolated_len: Dict[str, int] = {}
-    for w in candidates:
-        ids = tok(w, add_special_tokens=False).input_ids
-        isolated_len[w] = len(ids)
-
-    # Early prune: keep terms that actually fragment
-    pruned = [w for w in candidates if isolated_len.get(w, 0) > 1]
-
-    # Sample contexts to estimate boundary consistency
     samples_for_term: Dict[str, int] = defaultdict(int)
     equal_len_hits: Dict[str, int] = defaultdict(int)
-    if pruned:
-        # Build a small index: for each pruned term, compile pattern once
-        term_to_pat = {w: re.compile(rf"(?<!\w){re.escape(w)}(?!\w)") for w in pruned}
-        for text in examples:
-            # stop if all terms have enough samples
-            remaining = [w for w in pruned if samples_for_term[w] < sample_per_term]
-            if not remaining:
-                break
-            for w in list(remaining):
-                if samples_for_term[w] >= sample_per_term:
-                    continue
-                pat = term_to_pat[w]
-                for m in pat.finditer(text):
-                    # Robust span token count: tokenize the matched substring directly
-                    span_text = m.group(0)
-                    span_tokens = len(tok(span_text, add_special_tokens=False).input_ids)
-                    samples_for_term[w] += 1
-                    if span_tokens == isolated_len.get(w, 0):
-                        equal_len_hits[w] += 1
-                    if samples_for_term[w] >= sample_per_term:
-                        break
+    N_docs = 0
+    tok = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+    base_vocab = set(tok.get_vocab().keys())
+    for t in iter_med_texts(bench_dir, proc_dir):
+        N_docs += 1
+        seen_in_doc: set[str] = set()
+        for w in token_re.findall(t):
+            if len(w) > max_term_len:
+                continue
+            if w in base_vocab:
+                continue
+            freq[w] += 1
+            if w not in seen_in_doc:
+                docfreq[w] += 1
+                seen_in_doc.add(w)
+            # compute isolated length once
+            if w not in isolated_len:
+                isolated_len[w] = len(tok(w, add_special_tokens=False).input_ids)
+            # Optional boundary consistency sampling (disabled by default for speed)
+            if sample_per_term and isolated_len.get(w, 0) > 1 and samples_for_term[w] < sample_per_term:
+                span_tokens = len(tok(w, add_special_tokens=False).input_ids)
+                samples_for_term[w] += 1
+                if span_tokens == isolated_len.get(w, 0):
+                    equal_len_hits[w] += 1
 
-    for w in pruned:
-        bc_denom = max(1, samples_for_term.get(w, 0))
-        bc = (equal_len_hits.get(w, 0) / bc_denom) if bc_denom else 1.0
-        score = (isolated_len[w] - 1) * freq[w] * bc
+    if not freq:
+        return [], {}
+
+    # 2) Scoring: fragmentation gain × TF-IDF × boundary consistency
+    scores: Dict[str, float] = {}
+    def _idf(w: str) -> float:
+        try:
+            df = max(1, int(docfreq.get(w, 1)))
+            return math.log(max(1, N_docs) / df)
+        except Exception:
+            return 0.0
+    for w, tf in freq.most_common(top_k * 3):
+        if isolated_len.get(w, 0) <= 1:
+            continue
+        # Use bc=1.0 when boundary sampling is disabled
+        if sample_per_term:
+            bc_denom = max(1, samples_for_term.get(w, 0))
+            bc = (equal_len_hits.get(w, 0) / bc_denom) if bc_denom else 1.0
+        else:
+            bc = 1.0
+        tfidf = float(tf) * _idf(w)
+        score = max(0, isolated_len.get(w, 0) - 1) * tfidf * bc
         scores[w] = float(score)
 
     # sort by score

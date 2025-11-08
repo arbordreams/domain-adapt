@@ -2,6 +2,8 @@ import json
 import os
 import random
 from typing import Dict, List, Tuple, Optional, Any
+import hashlib
+import time
 
 from transformers import AutoTokenizer
 
@@ -56,7 +58,7 @@ def build_glove_corpora(
     proc_dir: str,
     corpus_src_path: str,
     corpus_tgt_path: str,
-    max_model_len: int = 8192,
+    max_model_len: int = 4096,
     corpus_dirs: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
     os.makedirs(os.path.dirname(corpus_src_path), exist_ok=True)
@@ -118,6 +120,8 @@ def build_glove_corpora(
                         yield v
 
     def _write_from(gen) -> Tuple[int, Dict[str, float], Dict[str, float]]:
+        # Batched tokenization for significantly reduced Python overhead
+        t_start = time.time()
         count = 0
         num_src = 0
         num_tgt = 0
@@ -132,32 +136,129 @@ def build_glove_corpora(
         sample_src: List[int] = []
         sample_tgt: List[int] = []
         sample_cap = 10000
+        BATCH = 1024
+        buf: List[str] = []
         with open(corpus_src_path, "w") as fs, open(corpus_tgt_path, "w") as ft:
-            for t in gen:
-                ids_s = tok_src(t, add_special_tokens=False, truncation=True, max_length=max_model_len)["input_ids"]
-                ids_t = tok_tgt(t, add_special_tokens=False, truncation=True, max_length=max_model_len)["input_ids"]
-                if len(ids_s) >= 15:
-                    if src_budget is None or written_src < src_budget:
+            def process_batch(texts: List[str]) -> None:
+                nonlocal count, num_src, num_tgt, written_src, written_tgt, sample_src, sample_tgt
+                if not texts:
+                    return
+                enc_s = tok_src(texts, add_special_tokens=False, truncation=True, max_length=max_model_len, padding=False)
+                enc_t = tok_tgt(texts, add_special_tokens=False, truncation=True, max_length=max_model_len, padding=False)
+                ids_s_list = enc_s["input_ids"]
+                ids_t_list = enc_t["input_ids"]
+                for ids_s, ids_t in zip(ids_s_list, ids_t_list):
+                    wrote_any = False
+                    if len(ids_s) >= 15 and (src_budget is None or written_src < src_budget):
                         _line_s = " ".join(map(str, ids_s)) + "\n"
                         fs.write(_line_s)
                         written_src += len(_line_s.encode("utf-8"))
                         num_src += 1
                         if len(sample_src) < sample_cap:
                             sample_src.append(len(ids_s))
-                if len(ids_t) >= 15:
-                    if tgt_budget is None or written_tgt < tgt_budget:
+                        wrote_any = True
+                    if len(ids_t) >= 15 and (tgt_budget is None or written_tgt < tgt_budget):
                         _line_t = " ".join(map(str, ids_t)) + "\n"
                         ft.write(_line_t)
                         written_tgt += len(_line_t.encode("utf-8"))
                         num_tgt += 1
                         if len(sample_tgt) < sample_cap:
                             sample_tgt.append(len(ids_t))
-                if len(ids_s) >= 15 or len(ids_t) >= 15:
-                    count += 1
-                # Stop early once both budgets are exhausted
-                if src_budget is not None and tgt_budget is not None:
-                    if written_src >= src_budget and written_tgt >= tgt_budget:
+                        wrote_any = True
+                    if wrote_any:
+                        count += 1
+
+            # Optional threaded tokenization with single writer
+            workers = 0
+            try:
+                _w_env = os.environ.get("GLOVE_CORPUS_PARALLEL_WORKERS")
+                if _w_env:
+                    workers = max(0, int(_w_env))
+            except Exception:
+                workers = 0
+            if workers > 0:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                def encode_batch(texts: List[str]) -> Tuple[List[List[int]], List[List[int]]]:
+                    enc_s = tok_src(texts, add_special_tokens=False, truncation=True, max_length=max_model_len, padding=False)
+                    enc_t = tok_tgt(texts, add_special_tokens=False, truncation=True, max_length=max_model_len, padding=False)
+                    return enc_s["input_ids"], enc_t["input_ids"]
+
+                with ThreadPoolExecutor(max_workers=workers) as ex:
+                    futures: List[Tuple[List[str], object]] = []
+                    def submit_current():
+                        nonlocal buf
+                        if buf:
+                            texts = list(buf)
+                            fut = ex.submit(encode_batch, texts)
+                            futures.append((texts, fut))
+                            buf.clear()
+                    for t in gen:
+                        if src_budget is not None and tgt_budget is not None and written_src >= src_budget and written_tgt >= tgt_budget:
+                            break
+                        buf.append(t)
+                        if len(buf) >= BATCH:
+                            submit_current()
+                            # bound backlog
+                            if len(futures) > workers * 2:
+                                texts, fut = futures.pop(0)
+                                ids_s_list, ids_t_list = fut.result()
+                                for ids_s, ids_t in zip(ids_s_list, ids_t_list):
+                                    wrote_any = False
+                                    if len(ids_s) >= 15 and (src_budget is None or written_src < src_budget):
+                                        _line_s = " ".join(map(str, ids_s)) + "\n"
+                                        fs.write(_line_s)
+                                        written_src += len(_line_s.encode("utf-8"))
+                                        num_src += 1
+                                        if len(sample_src) < sample_cap:
+                                            sample_src.append(len(ids_s))
+                                        wrote_any = True
+                                    if len(ids_t) >= 15 and (tgt_budget is None or written_tgt < tgt_budget):
+                                        _line_t = " ".join(map(str, ids_t)) + "\n"
+                                        ft.write(_line_t)
+                                        written_tgt += len(_line_t.encode("utf-8"))
+                                        num_tgt += 1
+                                        if len(sample_tgt) < sample_cap:
+                                            sample_tgt.append(len(ids_t))
+                                        wrote_any = True
+                                    if wrote_any:
+                                        count += 1
+                    # flush remaining
+                    submit_current()
+                    for texts, fut in futures:
+                        ids_s_list, ids_t_list = fut.result()
+                        for ids_s, ids_t in zip(ids_s_list, ids_t_list):
+                            wrote_any = False
+                            if len(ids_s) >= 15 and (src_budget is None or written_src < src_budget):
+                                _line_s = " ".join(map(str, ids_s)) + "\n"
+                                fs.write(_line_s)
+                                written_src += len(_line_s.encode("utf-8"))
+                                num_src += 1
+                                if len(sample_src) < sample_cap:
+                                    sample_src.append(len(ids_s))
+                                wrote_any = True
+                            if len(ids_t) >= 15 and (tgt_budget is None or written_tgt < tgt_budget):
+                                _line_t = " ".join(map(str, ids_t)) + "\n"
+                                ft.write(_line_t)
+                                written_tgt += len(_line_t.encode("utf-8"))
+                                num_tgt += 1
+                                if len(sample_tgt) < sample_cap:
+                                    sample_tgt.append(len(ids_t))
+                                wrote_any = True
+                            if wrote_any:
+                                count += 1
+            else:
+                for t in gen:
+                    # Stop early once both budgets are exhausted
+                    if src_budget is not None and tgt_budget is not None and written_src >= src_budget and written_tgt >= tgt_budget:
                         break
+                    buf.append(t)
+                    if len(buf) >= BATCH:
+                        process_batch(buf)
+                        buf.clear()
+                # flush tail
+                if buf:
+                    process_batch(buf)
+                    buf.clear()
 
         def _stats(n: int, sample: List[int]) -> Dict[str, float]:
             if not sample:
@@ -171,6 +272,12 @@ def build_glove_corpora(
                 return float(srt[k])
             return {"lines": float(n), "avg_len": avg, "p50": pct(0.5), "p90": pct(0.9)}
 
+        # Throughput log
+        dt = max(1e-6, time.time() - t_start)
+        try:
+            print(f"[glove_corpora] wrote_lines={count} time_s={dt:.2f} lines_per_s={count/dt:.2f} bytes_src={written_src} bytes_tgt={written_tgt}")
+        except Exception:
+            pass
         return count, _stats(num_src, sample_src), _stats(num_tgt, sample_tgt)
 
     wrote, stats_src, stats_tgt = _write_from(iter_texts_primary() or [])
@@ -257,7 +364,16 @@ def compute_alignment(
         seed=int(seed),
     )
     import numpy as np
-    sim = np.matmul(rep1, rep2.T)
+    # Prepare fast nearest-neighbor search without creating full sim matrix (memory-heavy)
+    # Prefer FAISS (CPU/GPU). Fallback to batched NumPy matmul.
+    use_faiss = False
+    faiss = None  # type: ignore
+    try:
+        import faiss  # type: ignore
+        faiss = faiss
+        use_faiss = True
+    except Exception:
+        use_faiss = False
 
     # Fast lookup structures
     ids1_index: Dict[str, int] = {tid: i for i, tid in enumerate(ids1)}
@@ -274,6 +390,9 @@ def compute_alignment(
         "unk_second_best_count": 0,
         "oov_tgt_missing_count": 0,
     }
+    # Build candidate list for FAISS/batched processing (exclude gold-overlap)
+    query_tids: List[int] = []
+    query_rows: List[int] = []
     for tid_int in range(int(vocab_tgt_size)):
         tid = str(tid_int)
         if tid in supl:
@@ -281,25 +400,115 @@ def compute_alignment(
             continue
         id1_idx = ids1_index.get(tid)
         if id1_idx is None:
-            # TokAlign-faithful fallback: random supply
             td[tid] = int(rng.randint(0, int(vocab_src_size) - 1))
             report["oov_tgt_missing_count"] += 1
             report["random_supply_count"] += 1
             continue
-        lix = int(np.argmax(sim[id1_idx]))
-        lid = ids2[lix]
-        if avoid_unk_second_best and str(lid) in ("unk", "<unk>"):
-            top2 = set(np.argpartition(sim[id1_idx], -2)[-2:])
-            top1 = set(np.argpartition(sim[id1_idx], -1)[-1:])
-            cand = list(top2 - top1)
-            if cand:
-                lid = ids2[int(cand[0])]
-            report["unk_second_best_count"] += 1
+        query_tids.append(tid_int)
+        query_rows.append(int(id1_idx))
+
+    conf_gaps: List[float] = []
+
+    if query_rows:
+        rep1_np = np.asarray(rep1, dtype=np.float32)
+        rep2_np = np.asarray(rep2, dtype=np.float32)
+        if use_faiss and faiss is not None:
+            dim = int(rep2_np.shape[1])
+            try:
+                # Prefer GPU FAISS if available
+                ngpu = int(getattr(faiss, "get_num_gpus", lambda: 0)())
+            except Exception:
+                ngpu = 0
+            t0 = time.time()
+            if ngpu > 0:
+                res = faiss.StandardGpuResources()
+                index = faiss.GpuIndexFlatIP(res, dim)  # inner product on GPU
+            else:
+                index = faiss.IndexFlatIP(dim)  # CPU fallback
+            # Add database (source) vectors
+            index.add(rep2_np)
+            # Search in batches
+            batch = 4096
+            for b in range(0, len(query_rows), batch):
+                sub_idx = query_rows[b:b+batch]
+                sub_mat = rep1_np[sub_idx, :]
+                # top-2 to compute confidence gap
+                D, I = index.search(sub_mat, 2)
+                for i, tid_int in enumerate(query_tids[b:b+batch]):
+                    tid = str(tid_int)
+                    top1_ix = int(I[i, 0])
+                    top2_ix = int(I[i, 1]) if I.shape[1] > 1 else int(I[i, 0])
+                    lid = ids2[top1_ix]
+                    if avoid_unk_second_best and str(lid) in ("unk", "<unk>"):
+                        lid = ids2[top2_ix]
+                        report["unk_second_best_count"] += 1
+                    try:
+                        td[tid] = int(lid)
+                    except Exception:
+                        td[tid] = int(rng.randint(0, int(vocab_src_size) - 1))
+                        report["random_supply_count"] += 1
+                    # confidence: margin between top1 and top2
+                    try:
+                        gap = float(D[i, 0] - D[i, 1]) if D.shape[1] > 1 else 0.0
+                        conf_gaps.append(gap)
+                    except Exception:
+                        pass
+            t1 = time.time()
+            try:
+                q = len(query_rows)
+                print(f"[alignment][faiss]{'[gpu]' if ngpu>0 else '[cpu]'} queries={q} time_s={(t1-t0):.2f} qps={q/max(1e-6,(t1-t0)):.2f}")
+            except Exception:
+                pass
+        else:
+            # NumPy batched matmul
+            bsz = 1024
+            t0 = time.time()
+            rep2_T = rep2_np.T  # [P, N_src]
+            for b in range(0, len(query_rows), bsz):
+                sub_idx = query_rows[b:b+bsz]
+                sub_mat = rep1_np[sub_idx, :]  # [B, P]
+                sims = np.matmul(sub_mat, rep2_T)  # [B, N_src]
+                # top-2 per row
+                top1 = np.argmax(sims, axis=1)
+                # compute top-2 using argpartition for efficiency
+                part = np.argpartition(sims, -2, axis=1)[:, -2:]
+                # map each row to (best, second best)
+                for i, tid_int in enumerate(query_tids[b:b+bsz]):
+                    tid = str(tid_int)
+                    best_ix = int(top1[i])
+                    # determine second-best
+                    candidates = part[i]
+                    # ensure second best is not best
+                    second_ix = int(candidates[0]) if int(candidates[1]) == best_ix else int(candidates[1])
+                    lid = ids2[best_ix]
+                    if avoid_unk_second_best and str(lid) in ("unk", "<unk>"):
+                        lid = ids2[second_ix]
+                        report["unk_second_best_count"] += 1
+                    try:
+                        td[tid] = int(lid)
+                    except Exception:
+                        td[tid] = int(rng.randint(0, int(vocab_src_size) - 1))
+                        report["random_supply_count"] += 1
+                    try:
+                        gap = float(sims[i, best_ix] - sims[i, second_ix])
+                        conf_gaps.append(gap)
+                    except Exception:
+                        pass
+            t1 = time.time()
+            try:
+                q = len(query_rows)
+                print(f"[alignment][numpy] queries={q} time_s={(t1-t0):.2f} qps={q/max(1e-6,(t1-t0)):.2f}")
+            except Exception:
+                pass
+
+    # Aggregate confidence stats
+    if conf_gaps:
         try:
-            td[tid] = int(lid)
+            report["confidence_margin_mean"] = float(np.mean(conf_gaps))
+            report["confidence_margin_p50"] = float(np.median(conf_gaps))
+            report["confidence_margin_p90"] = float(np.percentile(conf_gaps, 90))
         except Exception:
-            td[tid] = int(rng.randint(0, int(vocab_src_size) - 1))
-            report["random_supply_count"] += 1
+            pass
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(td, f)
@@ -339,6 +548,9 @@ def warmup_new_rows(
     bench_dir: str,
     proc_dir: str,
     steps: int = 0,
+    stage1_lr: float = 5e-4,
+    stage2_steps: int = 0,
+    stage2_lr: float = 5e-5,
 ) -> None:
     if steps and steps > 0:
         from .new_rows_warmup import warmup_rows
@@ -349,6 +561,9 @@ def warmup_new_rows(
             bench_dir=bench_dir,
             proc_dir=proc_dir,
             steps=int(steps),
+            lr=float(stage1_lr),
+            full_steps=int(stage2_steps),
+            full_lr=float(stage2_lr),
         )
 
 
@@ -420,6 +635,126 @@ def run_vocab_adaptation(
         "gold_json": gold_json,
         "align_json": mapping_json,
     }
+
+
+def _embedding_cache_dir() -> str:
+    """Return the cache directory where trained embedding text files are stored."""
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    cache_dir = os.path.join(project_root, "runs", "embeddings")
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def _hash_for_corpus_and_params(corpus_path: str, params: Dict[str, Any]) -> str:
+    """Create a stable short hash from corpus identity (path, size, mtime) and params."""
+    try:
+        st = os.stat(corpus_path)
+        sig = f"{os.path.abspath(corpus_path)}|{st.st_size}|{int(st.st_mtime)}"
+    except Exception:
+        sig = os.path.abspath(corpus_path)
+    # Stable param serialization
+    keys = sorted(params.keys())
+    kv = "|".join(f"{k}={params[k]}" for k in keys)
+    h = hashlib.sha1()
+    h.update(sig.encode("utf-8"))
+    h.update(kv.encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
+def train_fasttext_vectors(
+    corpus_path: str,
+    save_name: Optional[str] = None,
+    vector_size: int = 300,
+    window_size: int = 15,
+    min_count: int = 5,
+    epochs: int = 5,
+) -> str:
+    """Train FastText vectors from a token-id corpus and save as GloVe-like .txt.
+
+    - Expects each line in corpus to be a space-separated list of token ids (strings/ints)
+    - Returns absolute path to the created vector .txt file
+    - Caches by corpus identity + params under runs/embeddings/
+    """
+    if not os.path.isabs(corpus_path):
+        corpus_path = os.path.abspath(corpus_path)
+    if not os.path.isfile(corpus_path):
+        raise FileNotFoundError(corpus_path)
+
+    params = {
+        "backend": "fasttext",
+        "vector_size": int(vector_size),
+        "window_size": int(window_size),
+        "min_count": int(min_count),
+        "epochs": int(epochs),
+    }
+    cache_root = _embedding_cache_dir()
+    cache_key = _hash_for_corpus_and_params(corpus_path, params)
+    base_name = (save_name + f"-{cache_key}") if save_name else f"vec-fasttext-{cache_key}"
+    out_txt = os.path.join(cache_root, f"{base_name}.txt")
+    meta_json = os.path.join(cache_root, f"{base_name}.meta.json")
+
+    # Cache hit
+    if os.path.isfile(out_txt):
+        return out_txt
+
+    # Lazy generator for sentences (token id strings)
+    class _Sentences:
+        def __iter__(self):
+            with open(corpus_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    toks = line.strip().split()
+                    if toks:
+                        yield toks
+
+    try:
+        from gensim.models import FastText  # type: ignore
+    except Exception as e:
+        raise RuntimeError("FastText backend requires 'gensim' to be installed") from e
+
+    sentences_iter_1 = _Sentences()
+    model = FastText(
+        vector_size=int(vector_size),
+        window=int(window_size),
+        min_count=int(min_count),
+        sg=0,  # CBOW (fast, stable)
+        workers=max(1, (os.cpu_count() or 1) - 1),
+    )
+    # Two-pass: build vocab then train (gensim requirement when iterable is one-shot)
+    model.build_vocab(corpus_iterable=sentences_iter_1)
+    sentences_iter_2 = _Sentences()
+    t0 = time.time()
+    model.train(
+        corpus_iterable=sentences_iter_2,
+        total_examples=model.corpus_count,
+        epochs=int(epochs),
+    )
+    dt = time.time() - t0
+
+    # Save in simple text format: "<token> <f1> <f2> ..."
+    with open(out_txt, "w", encoding="utf-8") as f:
+        for w in model.wv.index_to_key:
+            vec = model.wv[w]
+            f.write(w + " " + " ".join(str(float(x)) for x in vec) + "\n")
+
+    # Emit meta for traceability
+    try:
+        meta = {
+            "backend": "fasttext",
+            "vector_size": int(vector_size),
+            "window_size": int(window_size),
+            "min_count": int(min_count),
+            "epochs": int(epochs),
+            "corpus_path": corpus_path,
+            "vector_path": out_txt,
+            "train_seconds": round(float(dt), 3),
+            "vocab_size": int(getattr(model, "corpus_total_words", 0) or len(model.wv.index_to_key)),
+        }
+        with open(meta_json, "w", encoding="utf-8") as mf:
+            json.dump(meta, mf, indent=2)
+    except Exception:
+        pass
+
+    return out_txt
 
 
 def train_glove_vectors(

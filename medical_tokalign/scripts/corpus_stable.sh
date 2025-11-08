@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+IFS=$'\n\t'
+echo "This script is deprecated."
+echo "Use medical_tokalign/scripts/autorun_demo.sh or medical_tokalign/scripts/autorun_prod.sh instead."
+echo "Example:"
+echo "  bash medical_tokalign/scripts/autorun_prod.sh --corpus_config medical_tokalign/configs/corpus_biomed.yaml --model_id <MODEL_ID>"
+exit 2
+
+#!/usr/bin/env bash
+set -euo pipefail
 
 # Resolve repo root
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"      # medical_tokalign

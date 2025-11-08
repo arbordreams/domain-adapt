@@ -23,10 +23,13 @@ medical_tokalign/
     runpod_env.example
   scripts/
     bootstrap_runpod.sh
-    prepare_medical_data.sh
-    run_vocab_adaptation.sh
-    eval_medical.sh
-    runpod_start.sh
+    clean_runpod.sh
+    export_hf_model.sh
+    autorun_demo.sh
+    autorun_prod.sh
+    lib/
+      common.sh  resources.sh  glove.sh  data.sh  corpus.sh
+      adapt.sh   eval.sh       artifacts.sh       tmux.sh
   src/
     __init__.py
     cli.py
@@ -69,23 +72,20 @@ bash medical_tokalign/scripts/bootstrap_runpod.sh
 
 4) Prepare data (downloads/caches standard HF splits locally)
 ```
-bash medical_tokalign/scripts/prepare_medical_data.sh
-# or
 python -m medical_tokalign.src.cli prepare-data --all
 ```
 
 5) Run tokenizer adaptation (TokAlign‑style, adds tokens + resizes embeddings)
 ```
-bash medical_tokalign/scripts/run_vocab_adaptation.sh \
-  --model_id Qwen/Qwen2-7B \
-  --top_k 8192 \
-  --warmup_steps 2000   # optional
-# or
 python -m medical_tokalign.src.cli adapt \
   --model_id Qwen/Qwen2-7B \
   --top_k 8192 \
   --pivot 300 \
-  --warmup_steps 2000
+  --embedding_backend fasttext \
+  --warmup_steps 2000 \
+  --stage1_lr 5e-4 \
+  --stage2_steps 500 \
+  --stage2_lr 5e-5
 ```
 Artifacts are saved under `medical_tokalign/runs/tokenizer_adapt/<timestamp>/` and include:
 - tokenizer/ (adapted tokenizer)
@@ -96,39 +96,39 @@ Artifacts are saved under `medical_tokalign/runs/tokenizer_adapt/<timestamp>/` a
 
 6) Evaluate (vLLM if available; auto‑fallback to HF)
 ```
-bash medical_tokalign/scripts/eval_medical.sh --config medical_tokalign/configs/eval_medical.yaml
-# or
 python -m medical_tokalign.src.cli eval --config medical_tokalign/configs/eval_medical.yaml
 ```
 Outputs under `medical_tokalign/runs/medical_eval/<timestamp>/`:
 - metrics.json (aggregate)
+- alignment_metrics.json (token BLEU‑1 and BERTScore for alignment quality)
 - per-dataset CSVs (predictions, references)
 - samples.md (qualitative samples)
 
-Unattended Orchestrator (RunPod)
-```
-# Recommended env
-export CUDA_VISIBLE_DEVICES=0
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export HF_HOME=/workspace/.cache/huggingface
-export HF_HUB_ENABLE_HF_TRANSFER=1
-export HF_DATASETS_TRUST_REMOTE_CODE=1
+### Runners
+Use these consolidated runners for end-to-end flows. Default embeddings backend is fasttext; set `EMBEDDING_BACKEND=glove` to enable GloVe.
 
-# One command (with defaults)
-bash medical_tokalign/scripts/run_unattended.sh \
-  --model_id Qwen/Qwen2-7B \
-  --corpus_config medical_tokalign/configs/corpus_biomed.yaml \
-  --eval_config medical_tokalign/configs/eval_medical.yaml \
-  --top_k 8192 --pivot 300 --warmup_steps 0
-
-# Or launch inside tmux and extend timeouts
-bash medical_tokalign/scripts/run_unattended.sh --tmux \
-  --step_timeout 28800 --max_retries 1
-
-# Logs & telemetry
-ls -l medical_tokalign/runs/logs/pipeline_*.{log,jsonl}
-cat medical_tokalign/runs/logs/pipeline_*_summary.json
-```
+- Demo (fast smoke/test; no tmux):
+  ```
+  bash medical_tokalign/scripts/autorun_demo.sh \
+    --model_id meta-llama/Meta-Llama-3.1-8B \
+    --corpus_config medical_tokalign/configs/corpus_med_tokalign_3gb.yaml \
+    --eval_config medical_tokalign/configs/eval_medical_ultra_quick.yaml \
+    --top_k 256 --pivot 300 --warmup_steps 0 --quick
+  ```
+- Prod (robust, resumable; tmux default):
+  ```
+  bash medical_tokalign/scripts/autorun_prod.sh \
+    --model_id meta-llama/Meta-Llama-3.1-8B \
+    --corpus_config medical_tokalign/configs/corpus_biomed.yaml \
+    --eval_config medical_tokalign/configs/eval_medical.yaml \
+    --top_k 8192 --pivot 300 --warmup_steps 0
+  # Run inline (no tmux)
+  bash medical_tokalign/scripts/autorun_prod.sh --no-tmux [...]
+  ```
+Notes:
+- GloVe is gated behind `EMBEDDING_BACKEND=glove`. The toolchain is built only when enabled and heavy intermediates are cleaned post-adapt.
+- Evaluation prefers vLLM; falls back to HF automatically if vLLM is unavailable.
+- Demo `--quick` temporarily reduces corpus budgets without modifying repo files.
 
 Stable Corpus Build (preflight + deterministic, file-backed logging)
 ```
@@ -150,18 +150,16 @@ python -m medical_tokalign.src.cli build-corpus \
 # - medical_tokalign/runs/logs/corpus_<ts>.{log,jsonl}
 ```
 
-Stable Entrypoints
-```
-# One command to preflight + strict build (resumable)
-bash medical_tokalign/scripts/corpus_stable.sh
-
-# End-to-end: prepare-data → corpus_stable → adapt → eval
-bash medical_tokalign/scripts/autorun.sh \
-  --model_id Qwen/Qwen2-7B \
-  --top_k 8192 \
-  --pivot 300 \
-  --warmup_steps 0
-```
+### Migration (deprecated → new)
+| Old script | Replacement |
+| --- | --- |
+| scripts/run_unattended.sh | scripts/autorun_prod.sh |
+| scripts/eval_medical.sh | scripts/autorun_demo.sh or scripts/autorun_prod.sh |
+| scripts/prepare_medical_data.sh | python -m medical_tokalign.src.cli prepare-data (or runners) |
+| scripts/run_vocab_adaptation.sh | scripts/autorun_* (uses CLI adapt under the hood) |
+| scripts/corpus_stable.sh | python -m medical_tokalign.src.cli build-corpus (or runners) |
+| scripts/prepare_biomed_corpus.sh | python -m medical_tokalign.src.cli build-corpus |
+| scripts/runpod_start.sh | scripts/autorun_prod.sh |
 
 Maintenance / Cleanup (RunPod)
 ```
@@ -171,10 +169,11 @@ bash medical_tokalign/scripts/clean_runpod.sh --fresh-corpus
 
 TokAlign‑style Adaptation Summary
 - Build alignment matrix A between medical terms and observed token bundles from the base tokenizer on medical corpora.
-- Score each term by expected fragmentation reduction × frequency × boundary consistency.
+- Score each term by fragmentation reduction × TF‑IDF × boundary consistency (single‑pass selector).
 - Select top‑K terms not already atomic; add to tokenizer; resize model embeddings.
 - Apply alignment using TokAlign conversion semantics (vendored), with strict state_dict replacement to avoid silent mismatches.
-- Optionally warm up only new embedding/lm_head rows with a brief CLM step on medical text.
+- Fast embedding backend (default FastText; fallback GloVe) with caching under `runs/embeddings/`.
+- Progressive adaptation: stage‑1 (embeddings + lm_head), optional stage‑2 (full model) on medical text.
 
 H100‑Optimized Defaults
 - precision: bf16
@@ -207,7 +206,7 @@ Troubleshooting
 - vLLM wheels: on fresh Torch/CUDA combos vLLM may be unavailable. The pipeline will fall back to HF automatically. You can also set `eval_backend: hf` in `configs/eval_medical.yaml` to force HF.
 
 
-One‑command End‑to‑End (RunPod)
+One‑command End‑to‑End (CLI)
 ```
 python -m medical_tokalign.src.cli pipeline \
   --model_id meta-llama/Meta-Llama-3.1-8B \
@@ -233,13 +232,5 @@ Citation & Licenses
 
 
 ## Stable pipeline
-
-```bash
-export CUDA_VISIBLE_DEVICES=0
-export HF_HOME=/workspace/.cache/huggingface
-cd /workspace/domain-adapt && git fetch --all --prune && git reset --hard origin/main
-bash medical_tokalign/scripts/corpus_stable.sh
-bash medical_tokalign/scripts/autorun.sh --model_id Qwen/Qwen2-7B --top_k 8192 --pivot 300 --warmup_steps 0
-bash medical_tokalign/scripts/autorun.sh --model_id Qwen/Qwen2-7B --top_k 8192 --pivot 300 --warmup_steps 0
-```
+Use the production runner or the CLI `pipeline` subcommand for fully unattended flows. Legacy orchestrators have been deprecated.
 

@@ -305,6 +305,10 @@ def cmd_adapt(args: argparse.Namespace) -> None:
     top_k = int(args.top_k)
     pivot = int(args.pivot)
     warmup_steps = int(getattr(args, "warmup_steps", 0) or 0)
+    stage1_lr = float(getattr(args, "stage1_lr", 5e-4))
+    stage2_steps = int(getattr(args, "stage2_steps", 0))
+    stage2_lr = float(getattr(args, "stage2_lr", 5e-5))
+    embedding_backend = str(getattr(args, "embedding_backend", "fasttext")).strip().lower()
 
     # 1) Term selection and tokenizer save
     api.select_and_save_tokenizer(
@@ -330,9 +334,15 @@ def cmd_adapt(args: argparse.Namespace) -> None:
         corpus_dirs=corpus_dirs,
     )
 
-    # 3) Train GloVe vectors
-    vec_src = api.train_glove_vectors(corpus_path=corpus_src, save_name="vec-source")
-    vec_tgt = api.train_glove_vectors(corpus_path=corpus_tgt, save_name="vec-target")
+    # 3) Train embedding vectors (backend-selectable)
+    if embedding_backend == "glove":
+        vec_src = api.train_glove_vectors(corpus_path=corpus_src, save_name="vec-source")
+        vec_tgt = api.train_glove_vectors(corpus_path=corpus_tgt, save_name="vec-target")
+    elif embedding_backend == "fasttext":
+        vec_src = api.train_fasttext_vectors(corpus_path=corpus_src, save_name="vec-source")
+        vec_tgt = api.train_fasttext_vectors(corpus_path=corpus_tgt, save_name="vec-target")
+    else:
+        raise SystemExit(f"Unsupported embedding_backend: {embedding_backend} (choices: glove, fasttext)")
 
     # 4) Gold overlap and alignment mapping
     gold_json = os.path.join(run_dir, "gold.json")
@@ -366,6 +376,9 @@ def cmd_adapt(args: argparse.Namespace) -> None:
         bench_dir=bench,
         proc_dir=proc,
         steps=warmup_steps,
+        stage1_lr=stage1_lr,
+        stage2_steps=stage2_steps,
+        stage2_lr=stage2_lr,
     )
 
     print(run_dir)
@@ -470,6 +483,10 @@ def build_parser() -> argparse.ArgumentParser:
     p3.add_argument("--top_k", type=int, default=8192)
     p3.add_argument("--pivot", type=int, default=300)
     p3.add_argument("--warmup_steps", type=int, default=0)
+    p3.add_argument("--stage1_lr", type=float, default=5e-4, help="LR for stage-1 (embeddings + lm_head)")
+    p3.add_argument("--stage2_steps", type=int, default=0, help="Optional stage-2 full-parameter finetuning steps")
+    p3.add_argument("--stage2_lr", type=float, default=5e-5, help="LR for stage-2 full-parameter finetuning")
+    p3.add_argument("--embedding_backend", type=str, default="fasttext", choices=["fasttext", "glove"], help="Embedding backend used to train token vectors (default: fasttext)")
     p3.add_argument("--seed", type=int, default=17)
     p3.add_argument("--no_unk_second_best", action="store_true", help="Disable second-best fallback when argmax is UNK (TokAlign ablation)")
     p3.set_defaults(func=cmd_adapt)
@@ -485,6 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     p5.add_argument("--top_k", type=int, default=8192)
     p5.add_argument("--pivot", type=int, default=300)
     p5.add_argument("--warmup_steps", type=int, default=0)
+    p5.add_argument("--embedding_backend", type=str, default="fasttext", choices=["fasttext", "glove"], help="Embedding backend used to train token vectors (default: fasttext)")
     p5.add_argument("--seed", type=int, default=17)
     # optional sweeps (comma-separated integers)
     p5.add_argument("--sweep_top_k", type=str, default="")

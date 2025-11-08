@@ -252,6 +252,87 @@ def main():
     bench_dir = os.path.join(data_root, "benchmarks")
     proc_dir = os.path.join(data_root, "processed")
 
+    # Optional: Alignment quality metrics (token BLEU-1 and semantic BERTScore)
+    try:
+        if adapted and adapted.tokenizer_dir:
+            # Attempt to locate mapping next to adapted artifacts
+            map_path = os.path.join(os.path.dirname(adapted.tokenizer_dir), "align_matrix.json")
+            if os.path.isfile(map_path):
+                from transformers import AutoTokenizer as _ATok
+                src_tok = _ATok.from_pretrained(model_id, use_fast=True)
+                tgt_tok = _ATok.from_pretrained(adapted.tokenizer_dir, use_fast=True)
+                # Load mapping (target_id -> source_id) and invert to source->target
+                with open(map_path, "r", encoding="utf-8") as fm:
+                    tgt2src = json.load(fm)
+                src2tgt: Dict[int, int] = {}
+                for k, v in tgt2src.items():
+                    try:
+                        tgt_id = int(k)
+                        src_id = int(v)
+                        # keep first seen
+                        if src_id not in src2tgt:
+                            src2tgt[src_id] = tgt_id
+                    except Exception:
+                        continue
+                # Sample texts (reuse perplexity corpus if available)
+                from .datasets_medical import load_perplexity_corpus as _load_ppl
+                texts = _load_ppl(proc_dir, source=cfg.get("datasets", {}).get("perplexity_corpus")) or []
+                if not texts:
+                    # fallback to minimal from PubMedQA questions
+                    try:
+                        from .datasets_medical import load_pubmedqa as _lpqa
+                        ds = _lpqa(bench_dir)
+                        texts = [str(ex.get("question", "")) for ex in (ds.get("test") or []) if ex.get("question")]
+                    except Exception:
+                        texts = []
+                cap = int(cfg.get("alignment", {}).get("metric_sample_cap", 200))
+                texts = texts[:cap] if cap and cap > 0 else texts
+                if texts:
+                    src_seqs = []
+                    tgt_seqs = []
+                    mapped_tgt_seqs = []
+                    mapped_texts = []
+                    for t in texts:
+                        s_ids = src_tok(t, add_special_tokens=False).input_ids
+                        t_ids = tgt_tok(t, add_special_tokens=False).input_ids
+                        src_seqs.append([str(i) for i in s_ids])
+                        tgt_seqs.append([str(i) for i in t_ids])
+                        mapped = [src2tgt[i] for i in s_ids if i in src2tgt]
+                        mapped_tgt_seqs.append([str(i) for i in mapped])
+                        try:
+                            mapped_texts.append(tgt_tok.decode(mapped, skip_special_tokens=True))
+                        except Exception:
+                            mapped_texts.append("")
+                    # BLEU-1 over token id strings (no tokenization)
+                    try:
+                        from sacrebleu.metrics import BLEU as _BLEU  # type: ignore
+                        bleu1 = _BLEU(tokenize="none", effective_order=False, max_ngram_order=1)
+                        pred = [" ".join(seq) for seq in mapped_tgt_seqs]
+                        ref = [" ".join(seq) for seq in tgt_seqs]
+                        score_bleu = float(bleu1.corpus_score(pred, [ref]).score)
+                    except Exception:
+                        # Fallback: standard sacrebleu with default options
+                        from sacrebleu import corpus_bleu as _cbleu  # type: ignore
+                        pred = [" ".join(seq) for seq in mapped_tgt_seqs]
+                        ref = [" ".join(seq) for seq in tgt_seqs]
+                        score_bleu = float(_cbleu(pred, [ref]).score)
+                    # BERTScore over recovered text vs original
+                    score_bert = None
+                    try:
+                        from bert_score import score as bert_score  # type: ignore
+                        P, R, F = bert_score(mapped_texts, texts, lang="en", rescale_with_baseline=True)
+                        score_bert = float(F.mean().item())
+                    except Exception:
+                        score_bert = None
+                    align_metrics = {
+                        "token_bleu1": float(score_bleu),
+                        "bertscore_f1": float(score_bert) if score_bert is not None else None,
+                        "samples": int(len(texts)),
+                    }
+                    save_json(align_metrics, os.path.join(run_dir, "alignment_metrics.json"))
+    except Exception as e:
+        print(f"[MedTokAlign] Alignment metrics skipped: {e}")
+
     # Dataset config helpers
     def _ds_cfg(name: str) -> dict:
         ds = cfg.get("datasets", {}).get(name)
@@ -738,6 +819,70 @@ def main():
                         save_stats(run_dir, stats)
             except Exception as e:
                 print(f"[MedTokAlign] Stats computation skipped: {e}")
+        # Optional baseline comparisons (quality guardrails)
+        try:
+            # Compare alignment metrics to baseline if both exist
+            align_cur = os.path.join(run_dir, "alignment_metrics.json")
+            baseline_align = os.environ.get("ALIGN_BASELINE_JSON")
+            if baseline_align and os.path.isfile(baseline_align) and os.path.isfile(align_cur):
+                with open(align_cur, "r", encoding="utf-8") as f1, open(baseline_align, "r", encoding="utf-8") as f2:
+                    cur = json.load(f1) or {}
+                    base = json.load(f2) or {}
+                def _val(d, k): 
+                    v = d.get(k)
+                    try:
+                        return float(v)
+                    except Exception:
+                        return None
+                for k in ("token_bleu1", "bertscore_f1"):
+                    v_cur = _val(cur, k)
+                    v_base = _val(base, k)
+                    if v_cur is not None and v_base is not None:
+                        delta = v_cur - v_base
+                        print(f"[guardrail][alignment] {k}: current={v_cur:.4f} baseline={v_base:.4f} delta={delta:+.4f}")
+            # Compare evaluation metrics to baseline if provided
+            baseline_eval = os.environ.get("EVAL_BASELINE_JSON")
+            # Select per-variant summary if multi-variant run; default to adapted then base
+            eff_summary = {}
+            try:
+                if len(summary) > 1:
+                    if "adapted" in summary:
+                        eff_summary = summary["adapted"]
+                    elif "base" in summary:
+                        eff_summary = summary["base"]
+                    else:
+                        # pick first variant
+                        eff_summary = summary[list(summary.keys())[0]]
+                else:
+                    # single-variant: summary is variant->metrics map of size 1
+                    eff_summary = next(iter(summary.values()))
+            except Exception:
+                eff_summary = {}
+            if baseline_eval and os.path.isfile(baseline_eval) and eff_summary:
+                with open(baseline_eval, "r", encoding="utf-8") as fb:
+                    base_eval = json.load(fb) or {}
+                # baseline may be multi-variant; flatten if needed
+                if any(isinstance(v, dict) for v in base_eval.values()):
+                    if "adapted" in base_eval:
+                        base_eval = base_eval["adapted"]
+                    elif "base" in base_eval:
+                        base_eval = base_eval["base"]
+                    else:
+                        try:
+                            base_eval = base_eval[list(base_eval.keys())[0]]
+                        except Exception:
+                            base_eval = {}
+                for k, v in eff_summary.items():
+                    try:
+                        v_cur = float(v)
+                        v_base = float(base_eval.get(k)) if k in base_eval else None
+                    except Exception:
+                        v_cur, v_base = None, None
+                    if v_cur is not None and v_base is not None:
+                        delta = v_cur - v_base
+                        print(f"[guardrail][eval] {k}: current={v_cur:.4f} baseline={v_base:.4f} delta={delta:+.4f}")
+        except Exception as e:
+            print(f"[MedTokAlign] Baseline comparison skipped: {e}")
         return
 
     # (Legacy single-variant path removed; handled above.)

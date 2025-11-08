@@ -20,6 +20,10 @@ MODEL_ID=""
 TOP_K="8192"
 PIVOT="300"
 WARMUP_STEPS="3000"
+STAGE1_LR="${STAGE1_LR:-5e-4}"
+STAGE2_STEPS="${STAGE2_STEPS:-0}"
+STAGE2_LR="${STAGE2_LR:-5e-5}"
+EMBEDDING_BACKEND="${EMBEDDING_BACKEND:-fasttext}"
 MAX_RETRIES="2"
 EVAL_CONFIG="$ROOT_DIR/configs/eval_medical.yaml"
 USE_TMUX="${USE_TMUX:-1}"
@@ -30,6 +34,10 @@ while [[ $# -gt 0 ]]; do
     --top_k) TOP_K="$2"; shift 2 ;;
     --pivot) PIVOT="$2"; shift 2 ;;
     --warmup_steps) WARMUP_STEPS="$2"; shift 2 ;;
+    --embedding_backend) EMBEDDING_BACKEND="$2"; shift 2 ;;
+    --stage1_lr) STAGE1_LR="$2"; shift 2 ;;
+    --stage2_steps) STAGE2_STEPS="$2"; shift 2 ;;
+    --stage2_lr) STAGE2_LR="$2"; shift 2 ;;
     --max_retries) MAX_RETRIES="$2"; shift 2 ;;
     --eval_config) EVAL_CONFIG="$2"; shift 2 ;;
     --no-tmux) USE_TMUX=0; shift 1 ;;
@@ -38,7 +46,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$MODEL_ID" ]]; then
-  echo "Usage: $0 --model_id <hf_model_id> [--top_k N] [--pivot N] [--warmup_steps N] [--max_retries N] [--no-tmux]" >&2
+  echo "Usage: $0 --model_id <hf_model_id> [--top_k N] [--pivot N] [--warmup_steps N] [--embedding_backend fasttext|glove] [--stage1_lr LR] [--stage2_steps N] [--stage2_lr LR] [--max_retries N] [--no-tmux]" >&2
   exit 2
 fi
 
@@ -53,7 +61,7 @@ if [[ -z "${TMUX:-}" && "${USE_TMUX}" != "0" ]]; then
 fi
 
 exec &> >(tee -a "$PIPE_LOG")
-echo "[autorun] ts=$TS model_id=$MODEL_ID top_k=$TOP_K pivot=$PIVOT warmup_steps=$WARMUP_STEPS max_retries=$MAX_RETRIES"
+echo "[autorun] ts=$TS model_id=$MODEL_ID top_k=$TOP_K pivot=$PIVOT warmup_steps=$WARMUP_STEPS emb_backend=$EMBEDDING_BACKEND stage1_lr=$STAGE1_LR stage2_steps=$STAGE2_STEPS stage2_lr=$STAGE2_LR max_retries=$MAX_RETRIES"
 
 # -------- resources --------
 RAM_MB="$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 131072)"
@@ -189,7 +197,11 @@ for retry in $(seq 0 "$MAX_RETRIES"); do
     --model_id "$MODEL_ID" \
     --top_k "$TOP_K" \
     --pivot "$PIVOT" \
-    --warmup_steps "$WARMUP_STEPS"
+    --warmup_steps "$WARMUP_STEPS" \
+    --embedding_backend "$EMBEDDING_BACKEND" \
+    --stage1_lr "$STAGE1_LR" \
+    --stage2_steps "$STAGE2_STEPS" \
+    --stage2_lr "$STAGE2_LR"
   ADAPT_RC=$?
   echo "[autorun] adapt rc=$ADAPT_RC"
   if [[ "$ADAPT_RC" -eq 0 ]]; then break; fi

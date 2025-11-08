@@ -76,6 +76,7 @@ def ensure_env_defaults() -> None:
     os.environ.setdefault("HF_DATASETS_TRUST_REMOTE_CODE", "1")
     os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(_repo_root(), ".cache", "huggingface", "datasets"))
     os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(_repo_root(), ".cache", "huggingface", "transformers"))
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "true")
 
 
 def preflight(telem: Telemetry, skip_bootstrap: bool) -> None:

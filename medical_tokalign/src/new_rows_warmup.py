@@ -6,6 +6,7 @@ from typing import Iterable, List
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from .perf_utils import configure_torch, maybe_compile
 
 
 def load_texts(bench_dir: str, proc_dir: str, max_docs: int = 20000) -> List[str]:
@@ -57,7 +58,11 @@ def warmup_rows(
     lr: float = 5e-4,
     per_device_batch_size: int = 4,
     max_len: int = 1024,
+    full_steps: int = 0,
+    full_lr: float = 5e-5,
 ):
+    # Configure Torch for performance on H100
+    configure_torch(allow_tf32=True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
 
@@ -68,6 +73,7 @@ def warmup_rows(
 
     tok = AutoTokenizer.from_pretrained(tokenizer_dir, use_fast=True)
     model = AutoModelForCausalLM.from_pretrained(adapted_model_path, torch_dtype=dtype)
+    model = maybe_compile(model, enabled=True)
     model.train()
     model.to(device)
 
@@ -96,6 +102,7 @@ def warmup_rows(
             yield batch
 
     it = batches()
+    _t0 = __import__("time").time()
     for step in range(steps):
         try:
             batch = next(it)
@@ -116,6 +123,39 @@ def warmup_rows(
         if (step + 1) % 100 == 0:
             print(f"[Warmup] step={step+1}/{steps} loss={loss.item():.4f}")
 
+    # Optional stage-2: unfreeze all parameters and continue training briefly
+    if full_steps and full_steps > 0:
+        _t1 = __import__("time").time()
+        _elapsed = max(1e-6, _t1 - _t0)
+        print(f\"[Warmup] completed {steps} steps in {_elapsed:.2f}s ({steps/_elapsed:.2f} steps/s)\")
+        for p in model.parameters():
+            p.requires_grad_(True)
+        opt_full = torch.optim.AdamW(model.parameters(), lr=full_lr)
+        model.train()
+        it2 = batches()
+        _t2 = __import__("time").time()
+        for step in range(full_steps):
+            try:
+                batch = next(it2)
+            except StopIteration:
+                break
+            enc = tok(batch, return_tensors="pt", padding=True, truncation=True, max_length=max_len)
+            enc = {k: v.to(device) for k, v in enc.items()}
+            out = model(**enc, labels=enc["input_ids"])
+            loss = out.loss
+            opt_full.zero_grad(set_to_none=True)
+            loss.backward()
+            opt_full.step()
+            if (step + 1) % 100 == 0:
+                print(f"[FullTune] step={step+1}/{full_steps} loss={loss.item():.4f}")
+        _t3 = __import__("time").time()
+        _elapsed2 = max(1e-6, _t3 - _t2)
+        print(f\"[FullTune] completed {full_steps} steps in {_elapsed2:.2f}s ({full_steps/_elapsed2:.2f} steps/s)\")
+    else:
+        _t1 = __import__("time").time()
+        _elapsed = max(1e-6, _t1 - _t0)
+        print(f\"[Warmup] completed {steps} steps in {_elapsed:.2f}s ({steps/_elapsed:.2f} steps/s)\")
+
     # Save in-place
     model.save_pretrained(adapted_model_path)
 
@@ -129,6 +169,8 @@ def main():
     ap.add_argument("--proc_dir", type=str, required=True)
     ap.add_argument("--warmup_steps", type=int, default=0)
     ap.add_argument("--lr", type=float, default=5e-4)
+    ap.add_argument("--full_steps", type=int, default=0)
+    ap.add_argument("--full_lr", type=float, default=5e-5)
     ap.add_argument("--per_device_batch_size", type=int, default=4)
     args = ap.parse_args()
 
@@ -141,6 +183,8 @@ def main():
             proc_dir=args.proc_dir,
             steps=int(args.warmup_steps),
             lr=float(args.lr),
+            full_steps=int(args.full_steps),
+            full_lr=float(args.full_lr),
             per_device_batch_size=int(args.per_device_batch_size),
         )
 

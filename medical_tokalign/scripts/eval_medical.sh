@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
+IFS=$'\n\t'
+echo "This script is deprecated."
+echo "Use medical_tokalign/scripts/autorun_demo.sh or medical_tokalign/scripts/autorun_prod.sh instead."
+echo "Example:"
+echo "  bash medical_tokalign/scripts/autorun_prod.sh --model_id meta-llama/Llama-3-8b"
+exit 2
+
+#!/usr/bin/env bash
+set -euo pipefail
 
 CONFIG_PATH="medical_tokalign/configs/eval_medical.yaml"
 
