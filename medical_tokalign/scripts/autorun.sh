@@ -21,7 +21,7 @@ TOP_K="8192"
 PIVOT="300"
 WARMUP_STEPS="3000"
 MAX_RETRIES="2"
-EVAL_CONFIG="$ROOT_DIR/configs/eval_medical_quick.yaml"
+EVAL_CONFIG="$ROOT_DIR/configs/eval_medical.yaml"
 USE_TMUX="${USE_TMUX:-1}"
 
 while [[ $# -gt 0 ]]; do
@@ -115,26 +115,7 @@ export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-$ALIGN_THREADS}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-$ALIGN_THREADS}"
 echo "[autorun] ALIGN_THREADS=$ALIGN_THREADS (OMP/MKL/OPENBLAS/NUMEXPR)"
 
-# -------- optional fast run profile (non-default; preserves production defaults) --------
-if [[ "${FAST_RUN:-0}" = "1" ]]; then
-  echo "[autorun] FAST_RUN=1: enabling speed-optimized settings" | tee -a "$PIPE_LOG"
-  # Reduce adaptation workload only if user didn't override via CLI
-  if [[ "${TOP_K}" = "8192" ]]; then TOP_K="2048"; fi
-  if [[ "${PIVOT}" = "300" ]]; then PIVOT="100"; fi
-  # Disable warmup by default for speed
-  WARMUP_STEPS="0"
-  # Smaller GloVe corpora and fewer training iterations (env-driven, optional)
-  # Force override to 500MB for fast run (better quality/speed balance than 300MB)
-  export GLOVE_CORPUS_MAX_BYTES="500000000"
-  export GLOVE_MAX_ITER="${GLOVE_MAX_ITER:-8}"
-  # Keep vector size at 300 for compatibility unless explicitly overridden
-  export GLOVE_VECTOR_SIZE="${GLOVE_VECTOR_SIZE:-300}"
-  # Prefer ultra-quick eval config if present (else quick)
-  if [[ -f "$ROOT_DIR/configs/eval_medical_ultra_quick.yaml" ]]; then
-    EVAL_CONFIG="$ROOT_DIR/configs/eval_medical_ultra_quick.yaml"
-  fi
-  echo "[autorun] fast profile: TOP_K=$TOP_K PIVOT=$PIVOT WARMUP_STEPS=$WARMUP_STEPS GLOVE_CORPUS_MAX_BYTES=$GLOVE_CORPUS_MAX_BYTES GLOVE_MAX_ITER=$GLOVE_MAX_ITER"
-fi
+# (Removed fast-run overrides; run with stable defaults)
 
 # -------- cleanup vestiges (best‑effort) --------
 for s in "$ROOT_DIR/scripts/autorun_overnight.sh" "$ROOT_DIR/scripts/autorun_stable.sh"; do
@@ -234,13 +215,11 @@ if [[ "$ADAPT_RC" -eq 0 ]]; then
     EVAL_BACKEND="vllm"
   fi
   export EVAL_BACKEND
-  # Determine effective eval config (priority: override > EVAL_CONFIG > quick default)
+  # Determine effective eval config (priority: override > EVAL_CONFIG)
   if [[ -n "${EVAL_CONFIG_OVERRIDE:-}" ]]; then
     EFF_EVAL_CONFIG="$EVAL_CONFIG_OVERRIDE"
   elif [[ -n "${EVAL_CONFIG:-}" ]]; then
     EFF_EVAL_CONFIG="$EVAL_CONFIG"
-  else
-    EFF_EVAL_CONFIG="$ROOT_DIR/configs/eval_medical_quick.yaml"
   fi
   python -m medical_tokalign.src.cli eval --config "$EFF_EVAL_CONFIG"
   EVAL_RC=$?

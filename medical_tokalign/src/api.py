@@ -440,11 +440,7 @@ def train_glove_vectors(
 
     Returns the path to the created vector .txt file (save_file.txt).
     """
-    # For FAST_RUN, start with tighter parameters to avoid large cooccurrence files
-    _fast_run = os.environ.get("FAST_RUN", "0") == "1"
-    if _fast_run:
-        window_size = min(window_size, 5)  # Very tight window for fast runs (shuffle fragile)
-        vocab_min_count = max(vocab_min_count, 15)  # Higher min_count significantly reduces vocabulary size
+    # Use stable defaults; do not tighten proactively for FAST_RUN to avoid regressions
     
     if not os.path.isabs(corpus_path):
         # Auto-resolve to absolute using CWD
@@ -563,11 +559,9 @@ def train_glove_vectors(
         )
 
     # Bound cooccurrence size; tighten params if oversized (check BEFORE shuffle to avoid crashes)
-    # Shuffle binary is fragile with files > 1GB, so be very conservative
-    # For fast runs, use even tighter threshold (800MB)
+    # Shuffle binary is fragile with very large files; bound to a conservative threshold
     try:
-        _fast_run = os.environ.get("FAST_RUN", "0") == "1"
-        threshold = (500 * 1024 * 1024) if _fast_run else (1536 * 1024 * 1024)  # 500 MB for fast, 1.5 GB otherwise
+        threshold = 1536 * 1024 * 1024  # 1.5 GB (stable default)
 
         def _regen_vocab_and_cooccur(_min_count: int, _window: int) -> int:
             with open(corpus_path, "rb") as fin, open(vocab_file, "wb") as fout:
@@ -610,23 +604,23 @@ def train_glove_vectors(
     except Exception:
         shuffle_memory_mb = float(min(16384.0, float(memory_mb)))
 
-    # Shuffle with conservative memory (params already tightened above if needed)
-    # Try decreasing memory if first attempt fails
-    shuffle_memory_plan: List[float] = [shuffle_memory_mb, 8192.0, 4096.0]
-    for _attempt, mem_try in enumerate(shuffle_memory_plan):
+    # Shuffle with broader memory plan (try higher -> lower)
+    mem_candidates_raw: List[float] = [shuffle_memory_mb, 16384.0, 12288.0, 8192.0, 4096.0, 2048.0]
+    mem_candidates: List[float] = []
+    for m in mem_candidates_raw:
+        if m not in mem_candidates and m > 0:
+            mem_candidates.append(m)
+    for _attempt, mem_try in enumerate(mem_candidates):
         try:
-            # Check cooccurrence size before each attempt
             _co_size_check = os.path.getsize(co_file) if os.path.exists(co_file) else 0
-            if _co_size_check > 1536 * 1024 * 1024:
-                print(f"[glove] WARNING: cooccur still {_co_size_check} bytes before shuffle attempt {_attempt}", flush=True)
             with open(co_file, 'rb') as fin, open(co_shuf_file, 'wb') as fout:
                 print(f"[glove] shuffle attempt={_attempt} memory_mb={mem_try} cooccur_size={_co_size_check}", flush=True)
-                subprocess.run([shuffle_bin, '-memory', str(mem_try), '-verbose', '2'], stdin=fin, stdout=fout, check=True)
+                subprocess.run([shuffle_bin, '-memory', str(int(mem_try)), '-verbose', '2'], stdin=fin, stdout=fout, check=True)
             break
         except Exception as e:
             _last_err = e
-            if _attempt < len(shuffle_memory_plan) - 1:
-                print(f"[glove] shuffle attempt {_attempt} failed, retrying with lower memory...", flush=True)
+            if _attempt < len(mem_candidates) - 1:
+                print(f"[glove] shuffle attempt {_attempt} failed, retrying with different memory...", flush=True)
             else:
                 print(f"[glove] shuffle failed after all attempts", flush=True)
     else:

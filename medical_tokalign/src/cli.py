@@ -331,22 +331,8 @@ def cmd_adapt(args: argparse.Namespace) -> None:
     )
 
     # 3) Train GloVe vectors
-    # Optional speed knobs via environment (preserve defaults if unset)
-    _glove_kwargs: dict = {}
-    try:
-        _mi = os.environ.get("GLOVE_MAX_ITER")
-        if _mi:
-            _glove_kwargs["max_iter"] = int(str(_mi).strip())
-    except Exception:
-        pass
-    try:
-        _vs = os.environ.get("GLOVE_VECTOR_SIZE")
-        if _vs:
-            _glove_kwargs["vector_size"] = int(str(_vs).strip())
-    except Exception:
-        pass
-    vec_src = api.train_glove_vectors(corpus_path=corpus_src, save_name="vec-source", **_glove_kwargs)
-    vec_tgt = api.train_glove_vectors(corpus_path=corpus_tgt, save_name="vec-target", **_glove_kwargs)
+    vec_src = api.train_glove_vectors(corpus_path=corpus_src, save_name="vec-source")
+    vec_tgt = api.train_glove_vectors(corpus_path=corpus_tgt, save_name="vec-target")
 
     # 4) Gold overlap and alignment mapping
     gold_json = os.path.join(run_dir, "gold.json")
