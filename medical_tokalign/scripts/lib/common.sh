@@ -132,9 +132,18 @@ trap _cleanup_lock EXIT INT TERM
 
 acquire_lock() {
   if [ -f "${LOCK_PATH}" ]; then
-    warn "Existing lock at ${LOCK_PATH}; previous run may be active. Use --force to override."
-    if [ "${FORCE_FLAG}" -eq 0 ]; then
-      exit 9
+    local lp pid ts
+    lp="$(cat "${LOCK_PATH}" 2>/dev/null || true)"
+    pid="$(echo "${lp}" | awk -F'[ =]' '/pid=/{print $2}')"
+    ts="$(echo "${lp}" | awk -F'[ =]' '/ts=/{print $2}')"
+    if [ -n "${pid:-}" ] && ps -p "${pid}" >/dev/null 2>&1; then
+      warn "Existing lock at ${LOCK_PATH} held by pid ${pid} (since ${ts:-unknown}); use --force to override."
+      if [ "${FORCE_FLAG}" -eq 0 ]; then
+        exit 9
+      fi
+      warn "Force flag set; removing active lock (pid=${pid})."
+    else
+      warn "Found stale lock at ${LOCK_PATH} (pid=${pid:-?} ts=${ts:-?}); cleaning up."
     fi
     rm -f "${LOCK_PATH}" || true
   fi
