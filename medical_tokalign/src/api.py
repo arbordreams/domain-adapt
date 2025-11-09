@@ -4,6 +4,7 @@ import random
 from typing import Dict, List, Tuple, Optional, Any
 import hashlib
 import time
+import math
 
 from transformers import AutoTokenizer
 
@@ -17,6 +18,77 @@ from .tokalign_vendor.cal_trans_matrix import (
 from .convert_strict import trans2switch_strict
 import subprocess
 import shutil
+
+
+def _env_int(name: str) -> Optional[int]:
+    val = os.environ.get(name)
+    if not val:
+        return None
+    try:
+        parsed = int(str(val).strip())
+        return parsed if parsed > 0 else None
+    except Exception:
+        return None
+
+
+def _available_cpu_count(default: int = 1) -> int:
+    """
+    Best-effort detection of CPUs available to the current process, aware of cgroup quotas.
+    """
+    # 1) sched_getaffinity (respects cpuset quotas)
+    try:
+        affinity = os.sched_getaffinity(0)  # type: ignore[attr-defined]
+        if affinity:
+            return max(1, len(affinity))
+    except (AttributeError, OSError):
+        pass
+
+    # 3) cgroup v2 cpu.max
+    cpu_max_path = "/sys/fs/cgroup/cpu.max"
+    try:
+        with open(cpu_max_path, "r", encoding="utf-8") as f:
+            quota_raw, period_raw = f.read().strip().split()
+            if quota_raw != "max":
+                quota = int(quota_raw)
+                period = int(period_raw)
+                if quota > 0 and period > 0:
+                    return max(1, math.floor(quota / period))
+    except Exception:
+        pass
+
+    # 4) cgroup v1 cpu.cfs_quota_us / cpu.cfs_period_us
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "r", encoding="utf-8") as fq, open(
+            "/sys/fs/cgroup/cpu/cpu.cfs_period_us", "r", encoding="utf-8"
+        ) as fp:
+            quota = int(fq.read().strip())
+            period = int(fp.read().strip())
+            if quota > 0 and period > 0:
+                return max(1, math.floor(quota / period))
+    except Exception:
+        pass
+
+    # 5) Fallback to os.cpu_count()
+    cpu_count = os.cpu_count()
+    if cpu_count and cpu_count > 0:
+        return cpu_count
+
+    return max(1, default)
+
+
+def _fasttext_worker_count() -> int:
+    """
+    Determine an appropriate number of FastText worker threads, respecting overrides and quotas.
+    """
+    override = _env_int("FASTTEXT_WORKERS")
+    if override:
+        return max(1, override)
+
+    cpus = _available_cpu_count()
+    # Leave one CPU for the main thread / I/O when possible.
+    if cpus > 1:
+        return max(1, cpus - 1)
+    return 1
 
 
 def prepare_data(bench_dir: str, proc_dir: str) -> None:
@@ -717,7 +789,7 @@ def train_fasttext_vectors(
         window=int(window_size),
         min_count=int(min_count),
         sg=0,  # CBOW (fast, stable)
-        workers=max(1, (os.cpu_count() or 1) - 1),
+        workers=_fasttext_worker_count(),
     )
     # Two-pass: build vocab then train (gensim requirement when iterable is one-shot)
     model.build_vocab(corpus_iterable=sentences_iter_1)
