@@ -1,8 +1,8 @@
-# TokAlign-faithful medical corpus (3.0 GB)
+# TokAlign-faithful medical corpus (1.0 GB for demo)
 # Deterministic, deduplicated, strict preflight, resumable
 
 random_seed: 17
-target_total_bytes: 3000000000
+target_total_bytes: 1000000000
 output_dir: medical_tokalign/data/biomed_corpus
 prevent_eval_contamination: true
 near_dup: minhash   # requires datasketch; set to 'none' to disable
@@ -19,7 +19,7 @@ sources:
     name: pubmed
     splits: [train, validation, test]
     text_fields: [article, abstract, text]
-    target_bytes: 1800000000
+    target_bytes: 600000000
     min_chars: 200
     max_chars: 20000
 
@@ -30,7 +30,7 @@ sources:
     name: null
     splits: [train, validation, test]
     text_fields: [text]
-    target_bytes: 600000000
+    target_bytes: 200000000
     min_chars: 60
     max_chars: 20000
 
@@ -41,7 +41,7 @@ sources:
     name: null
     splits: [train, validation]
     text_fields: [article, abstract]
-    target_bytes: 500000000
+    target_bytes: 200000000
     min_chars: 200
     max_chars: 20000
 
